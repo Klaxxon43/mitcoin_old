@@ -11,6 +11,8 @@ def admin_kb():
     ikb.button(text='Привязка чата 🔥', callback_data='chat_privyazka')
     ikb.button(text='Реклама в ОП', callback_data='op_pr_menu')
     ikb.button(text='Репорты на задания', callback_data='reports_list_menu')
+    ikb.button(text='Заявки на вывод', callback_data='adminoutputlist')
+    ikb.button(text='ОП в бонусах', callback_data='bonus_admin')
     ikb.button(text='‼ Удалить все задания ‼', callback_data='clean_task')
     ikb.adjust(1)
     return ikb.as_markup()
@@ -52,6 +54,7 @@ def select_deposit_menu_kb():
 def profile_kb():
     ikb = InlineKeyboardBuilder()
     ikb.button(text="Пополнить 💲", callback_data='select_deposit_menu')
+    ikb.button(text="Вывод 📤", callback_data='output_menu')
     ikb.button(text="Реферальная система 👥", callback_data='refka_menu')
     ikb.button(text="Мои задания 📋", callback_data='my_works')
     ikb.button(text="Назад 🔙", callback_data='back_menu')
@@ -80,7 +83,7 @@ def menu_kb():
     ikb.button(text='🔄 Конвертация', callback_data='corvertation')
     ikb.button(text='💸 Чеки', callback_data='checks_menu')
     ikb.button(text='👀 Статистика', callback_data='menu_stats')
-    ikb.button(text='💹 Пресейл', url='https://tonraffles.app/jetton/fairlaunch/MICO/EQAKAfkG7XDmKfAwVyziPryAPaArEOS1TWRs4YDagUlwygwl')
+    ikb.button(text='🎁 Бонус', callback_data='bonus_menu')
     ikb.button(text='О проекте 💎', callback_data='support')
 
     ikb.adjust(2)
