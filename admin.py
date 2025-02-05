@@ -1,9 +1,11 @@
+import asyncio
+
 from aiogram import types, Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from kb import admin_kb, cancel_all_kb, pr_menu_canc, back_menu_kb
 from db import DB
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from config import ADMINS_ID
 import os
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -12,8 +14,10 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ChatMember
 
 class MailingStates(StatesGroup):
     message = State()
+    progress = State()
 
 class AdminActions(StatesGroup):
+    update_rub_balance = State()
     view_user_profile = State()
     update_balance = State()
 
@@ -25,7 +29,491 @@ class create_op_tasks(StatesGroup):
     create_op_task = State()
     create_op_task2 = State()
 
+class create_opbonus_tasks(StatesGroup):
+    create_op = State()
+    create_op2 = State()
+
+
 admin = Router()
+
+
+
+
+
+
+
+
+
+
+
+def generate_opbonus_keyboard(op_bonus, bonuspage, total_pages):
+    builder = InlineKeyboardBuilder()
+
+    # Выводим задания на текущей странице (по 5 на страницу)
+    for task in op_bonus:
+        chat_id = task[1]
+
+        button_text = f"{chat_id}"
+        # Каждая кнопка в новой строке
+        builder.row(types.InlineKeyboardButton(text=button_text, callback_data=f"opbonus_{task[0]}"))
+
+    # Кнопка "Назад"
+    builder.row(types.InlineKeyboardButton(text="Создать 🔥", callback_data="create_opbonus_task"))
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_admin"))
+    # Кнопки пагинации
+    pagination = []
+    if bonuspage > 1:
+        pagination.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"bonuspage_{bonuspage - 1}"))
+    pagination.append(types.InlineKeyboardButton(text=str(bonuspage), callback_data="current_page"))
+    if bonuspage < total_pages:
+        pagination.append(types.InlineKeyboardButton(text="➡️", callback_data=f"bonuspage_{bonuspage + 1}"))
+
+    builder.row(*pagination)  # Кнопки пагинации в одну строку
+
+    return builder.as_markup()
+
+
+# Метод для получения страницы с заданиями (пагинация)
+def paginate_opbonus_tasks(tasks, bonuspage=1, per_page=5):
+    total_pages = (len(tasks) + per_page - 1) // per_page  # Вычисление общего количества страниц
+    start_idx = (bonuspage - 1) * per_page
+    end_idx = start_idx + per_page
+    tasks_on_page = tasks[start_idx:end_idx]
+    return tasks_on_page, total_pages
+
+
+@admin.callback_query(F.data == 'bonus_admin')
+async def bonus_tasks_handler(callback: types.CallbackQuery):
+    tasks = await DB.get_bonus_ops()
+    # Начинаем с первой страницы
+    bonuspage = 1
+    tasks_on_page, total_pages = paginate_opbonus_tasks(tasks, bonuspage)
+    # Генерируем инлайн кнопки
+    keyboard = generate_opbonus_keyboard(tasks_on_page, bonuspage, total_pages)
+    await callback.message.edit_text("Каналы/чаты в ОП бонусов", reply_markup=keyboard)
+
+
+
+
+@admin.callback_query(lambda c: c.data.startswith("bonuspage_"))
+async def change_page_handler(callback: types.CallbackQuery):
+    bonuspage = int(callback.data.split('_')[1])
+    user_id = callback.from_user.id
+    tasks = await DB.get_op_tasks()
+
+    # Получаем задания на нужной странице
+    tasks_on_page, total_pages = paginate_opbonus_tasks(tasks, bonuspage)
+
+    # Генерируем инлайн кнопки
+    keyboard = generate_opbonus_keyboard(tasks_on_page, bonuspage, total_pages)
+
+    await callback.message.edit_text("Каналы/чаты в ОП бонусов", reply_markup=keyboard)
+
+
+
+
+@admin.callback_query(lambda c: c.data.startswith("opbonus_"))
+async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
+    await callback.answer()
+    task_id = int(callback.data.split('_')[1])
+    task = await DB.get_bonus_op(task_id)
+
+
+    target = task[1]
+    link = task[2]
+    try:
+        chat = await bot.get_chat(target)
+        chat_title = chat.title
+    except:
+        chat_title = "Ошибка: невозможно получить название"
+
+    task_info = f"""
+Название - <b>{chat_title}</b>
+
+Ссылка - {link}
+
+{target}  
+    """
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="🔙 Назад", callback_data="bonus_admin"))
+    builder.add(types.InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"bonusdelete_{task_id}"))
+    await callback.message.edit_text(task_info, reply_markup=builder.as_markup())
+
+
+
+
+
+
+@admin.callback_query(lambda c: c.data.startswith("bonusdelete_"))
+async def delete_task_handler(callback: types.CallbackQuery):
+    id = int(callback.data.split('_')[1])
+
+    # Удаляем задачу из базы данных
+    await DB.remove_bonus_op(id)
+    await callback.message.edit_text("Удалено!")
+
+    # После удаления возвращаем пользователя к его заданиям
+
+    tasks = await DB.get_bonus_ops()
+    bonuspage = 1
+    tasks_on_page, total_pages = paginate_opbonus_tasks(tasks, bonuspage)
+    keyboard = generate_opbonus_keyboard(tasks_on_page, bonuspage, total_pages)
+
+    await callback.message.edit_text("Каналы/чаты в ОП бонусов", reply_markup=keyboard)
+
+
+
+
+
+
+
+@admin.callback_query(F.data == 'create_opbonus_task')
+async def create_op_task_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="❌ Назад", callback_data="back_admin"))
+    await callback.message.edit_text("Пришлите канал или чат в формате юзернейма, пример - @telegram", reply_markup=builder.as_markup())
+    await state.set_state(create_opbonus_tasks.create_op)
+
+@admin.message(create_opbonus_tasks.create_op)
+async def create_opbonus_task_handler2(message: types.Message, state: FSMContext, bot: Bot):
+    target_id = message.text.strip()
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="❌ Назад", callback_data="back_admin"))
+    await message.answer("Пришлите свою ссылку на канал/чат",
+                                     reply_markup=builder.as_markup())
+    await state.update_data(target_id=target_id)
+    await state.set_state(create_opbonus_tasks.create_op2)
+
+@admin.message(create_opbonus_tasks.create_op2)
+async def create_opbonus_task_handler2(message: types.Message, state: FSMContext, bot: Bot):
+    link = message.text.strip()
+    data = await state.get_data()
+    target_id = data.get('target_id')
+
+    await DB.add_bonus_op(target_id, link)
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="🔙 Вернуться в меню", callback_data="back_menu"))
+    await message.answer("🥳 Задание создано! Оно будет размещено в разделе бонусов", reply_markup=builder.as_markup())
+    await state.clear()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@admin.callback_query(F.data == 'adminoutputlist')
+async def adminoutputlist(callback: types.CallbackQuery, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="USDT", callback_data="adminusdtoutputlist"))
+    builder.add(types.InlineKeyboardButton(text="Рубли", callback_data="adminruboutputlist"))
+    builder.add(types.InlineKeyboardButton(text="🔙", callback_data="back_admin"))
+    await callback.message.edit_text(f'<b>Выберите тип вывода:</b>', reply_markup=builder.as_markup())
+
+
+
+def generate_usdt_keyboard(outputs, usdtpage, total_pages):
+    builder = InlineKeyboardBuilder()
+    # Выводим задания на текущей странице (по 5 на страницу)
+    for output in outputs:
+        amount = output[3]
+
+        button_text = f"{amount}"
+        # Каждая кнопка в новой строке
+        builder.row(types.InlineKeyboardButton(text=button_text, callback_data=f"usdttask_{output[0]}"))
+
+    # Кнопка "Назад"
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_admin"))
+    # Кнопки пагинации
+    pagination = []
+    if usdtpage > 1:
+        pagination.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"usdtpage_{usdtpage - 1}"))
+    pagination.append(types.InlineKeyboardButton(text=str(usdtpage), callback_data="current_page"))
+    if usdtpage < total_pages:
+        pagination.append(types.InlineKeyboardButton(text="➡️", callback_data=f"usdtpage_{usdtpage + 1}"))
+
+    builder.row(*pagination)  # Кнопки пагинации в одну строку
+
+    return builder.as_markup()
+
+# Метод для получения страницы с заданиями (пагинация)
+def paginate_usdt_tasks(outputs, usdtpage=1, per_page=5):
+    total_pages = (len(outputs) + per_page - 1) // per_page  # Вычисление общего количества страниц
+    start_idx = (usdtpage - 1) * per_page
+    end_idx = start_idx + per_page
+    tasks_on_page = outputs[start_idx:end_idx]
+    return tasks_on_page, total_pages
+
+@admin.callback_query(F.data == 'adminusdtoutputlist')
+async def adminusdtoutputlist(callback: types.CallbackQuery):
+    outputs = await DB.get_usdt_outputs()
+    # Начинаем с первой страницы
+    usdtpage = 1
+    tasks_on_page, total_pages = paginate_usdt_tasks(outputs, usdtpage)
+    # Генерируем инлайн кнопки
+    keyboard = generate_usdt_keyboard(tasks_on_page, usdtpage, total_pages)
+    await callback.message.edit_text("Список заявок на вывод в <b>USDT (BEP20)</b>", reply_markup=keyboard)
+
+
+@admin.callback_query(lambda c: c.data.startswith("usdtpage_"))
+async def change_page_handler(callback: types.CallbackQuery):
+    usdtpage = int(callback.data.split('_')[1])
+    outputs = await DB.get_usdt_outputs()
+
+    # Получаем задания на нужной странице
+    tasks_on_page, total_pages = paginate_usdt_tasks(outputs, usdtpage)
+
+    # Генерируем инлайн кнопки
+    keyboard = generate_usdt_keyboard(tasks_on_page, usdtpage, total_pages)
+    await callback.message.edit_text("Список заявок на вывод в <b>USDT (BEP20)</b>", reply_markup=keyboard)
+
+
+@admin.callback_query(lambda c: c.data.startswith("usdttask_"))
+async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
+    await callback.answer()
+    id = int(callback.data.split('_')[1])
+    output = await DB.get_output(id)
+    if output is not None:
+        try:
+            user_id = output[1]
+        except:
+            user_id = "ошибка"
+        try:
+            wallet = output[2]
+        except:
+            wallet = "ошибка"
+        try:
+            amount = output[3]
+        except:
+            amount = "ошибка"
+
+        task_info = f"""
+📤 <b>Заявка на вывод в USDT:</b>
+<b>ID</b> - <code>{user_id}</code>
+    
+👛 <b>Кошелек USDT(BEP20)</b> - 
+<code>{wallet}</code>
+    
+💲 <b>Сумма</b> - <code>{amount}</code>
+    
+<span class="tg-spoiler">⚠ При нажатии кнопки <b>Выполнено</b> заявка удаляется из списка и рубли на баланс юзера НЕ ВОЗВРАЩАЮТСЯ</span>
+        """
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text="✅ Выполнено", callback_data=f"usdtsuc_{id}"))
+        builder.add(types.InlineKeyboardButton(text="❌ Отклонить", callback_data=f"usdtdelete_{id}"))
+        builder.add(types.InlineKeyboardButton(text="🔙 Назад", callback_data="adminusdtoutputlist"))
+        await callback.message.edit_text(task_info, reply_markup=builder.as_markup())
+    else:
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text="🔙 Назад", callback_data="adminusdtoutputlist"))
+        await callback.message.edit_text("Заявка не найдена", reply_markup=builder.as_markup())
+
+@admin.callback_query(lambda c: c.data.startswith("usdtdelete_"))
+async def delete_task_handler(callback: types.CallbackQuery, bot: Bot):
+    id = int(callback.data.split('_')[1])
+    # Удаляем задачу из базы данных
+    output = await DB.get_output(id)
+    user_id = output[1]
+    await DB.delete_output(id)
+    await callback.message.edit_text("❌ Отклонено")
+    await bot.send_message(chat_id=user_id, text='☹ Ваша заявка на вывод отклонена', reply_markup=back_menu_kb())
+    outputs = await DB.get_usdt_outputs()
+    usdtpage = 1
+
+    tasks_on_page, total_pages = paginate_usdt_tasks(outputs, usdtpage)
+    keyboard = generate_usdt_keyboard(tasks_on_page, usdtpage, total_pages)
+    await callback.message.edit_text("Список заявок на вывод в <b>USDT</b>", reply_markup=keyboard)
+
+
+@admin.callback_query(lambda c: c.data.startswith("usdtsuc_"))
+async def delete_task_handler(callback: types.CallbackQuery, bot: Bot):
+    id = int(callback.data.split('_')[1])
+
+    output = await DB.get_output(id)
+    user_id = output[1]
+    await DB.delete_output(id)
+    await callback.message.edit_text("✅ Выполнено")
+    await bot.send_message(chat_id=user_id, text='🥳 Ваша заявка на вывод одобрена!', reply_markup=back_menu_kb())
+    outputs = await DB.get_usdt_outputs()
+    usdtpage = 1
+
+    tasks_on_page, total_pages = paginate_usdt_tasks(outputs, usdtpage)
+    keyboard = generate_usdt_keyboard(tasks_on_page, usdtpage, total_pages)
+    await callback.message.edit_text("Список заявок на вывод в <b>USDT</b>", reply_markup=keyboard)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def generate_rub_keyboard(outputs, rubpage, total_pages):
+    builder = InlineKeyboardBuilder()
+    # Выводим задания на текущей странице (по 5 на страницу)
+    for output in outputs:
+        amount = output[3]
+
+        button_text = f"{amount}"
+        # Каждая кнопка в новой строке
+        builder.row(types.InlineKeyboardButton(text=button_text, callback_data=f"rubtask_{output[0]}"))
+
+    # Кнопка "Назад"
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_admin"))
+    # Кнопки пагинации
+    pagination = []
+    if rubpage > 1:
+        pagination.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"rubpage_{rubpage - 1}"))
+    pagination.append(types.InlineKeyboardButton(text=str(rubpage), callback_data="current_page"))
+    if rubpage < total_pages:
+        pagination.append(types.InlineKeyboardButton(text="➡️", callback_data=f"rubpage_{rubpage + 1}"))
+
+    builder.row(*pagination)  # Кнопки пагинации в одну строку
+
+    return builder.as_markup()
+
+
+# Метод для получения страницы с заданиями (пагинация)
+def paginate_rub_tasks(outputs, rubpage=1, per_page=5):
+    total_pages = (len(outputs) + per_page - 1) // per_page  # Вычисление общего количества страниц
+    start_idx = (rubpage - 1) * per_page
+    end_idx = start_idx + per_page
+    tasks_on_page = outputs[start_idx:end_idx]
+    return tasks_on_page, total_pages
+
+
+@admin.callback_query(F.data == 'adminruboutputlist')
+async def adminruboutputlist(callback: types.CallbackQuery):
+    outputs = await DB.get_rub_outputs()
+    # Начинаем с первой страницы
+    rubpage = 1
+    tasks_on_page, total_pages = paginate_rub_tasks(outputs, rubpage)
+    # Генерируем инлайн кнопки
+    keyboard = generate_rub_keyboard(tasks_on_page, rubpage, total_pages)
+    await callback.message.edit_text("Список заявок на вывод в <b>рублях</b>", reply_markup=keyboard)
+
+
+@admin.callback_query(lambda c: c.data.startswith("rubpage_"))
+async def change_rubpage_handler(callback: types.CallbackQuery):
+    rubpage = int(callback.data.split('_')[1])
+    outputs = await DB.get_rub_outputs()
+
+    # Получаем задания на нужной странице
+    tasks_on_page, total_pages = paginate_rub_tasks(outputs, rubpage)
+
+    # Генерируем инлайн кнопки
+    keyboard = generate_rub_keyboard(tasks_on_page, rubpage, total_pages)
+    await callback.message.edit_text("Список заявок на вывод в <b>рублях</b>", reply_markup=keyboard)
+
+
+@admin.callback_query(lambda c: c.data.startswith("rubtask_"))
+async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
+    await callback.answer()
+    id = int(callback.data.split('_')[1])
+    output = await DB.get_output(id)
+    if output is not None:
+        try:
+            user_id = output[1]
+        except:
+            user_id = "ошибка"
+        try:
+            wallet = output[2]
+        except:
+            wallet = "ошибка"
+        try:
+            amount = output[3]
+        except:
+            amount = "ошибка"
+
+        task_info = f"""
+📤 <b>Заявка на вывод в рублях:</b>
+<b>ID</b> - <code>{user_id}</code>
+
+💳 <b>Карта/телефон(для СБП)</b> - 
+<code>{wallet}</code>
+
+💲 <b>Сумма</b> - <code>{amount}</code>
+
+<span class="tg-spoiler">⚠ При нажатии кнопки <b>Отклонить</b> заявка удаляется из списка и рубли на баланс юзера НЕ ВОЗВРАЩАЮТСЯ</span>
+        """
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text="✅ Выполнено", callback_data=f"rubsuc_{id}"))
+        builder.add(types.InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rubdelete_{id}"))
+        builder.add(types.InlineKeyboardButton(text="🔙", callback_data="adminruboutputlist"))
+        await callback.message.edit_text(task_info, reply_markup=builder.as_markup())
+    else:
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text="🔙 Назад", callback_data="adminruboutputlist"))
+        await callback.message.edit_text("Заявка не найдена", reply_markup=builder.as_markup())
+
+
+@admin.callback_query(lambda c: c.data.startswith("rubdelete_"))
+async def delete_task_handler(callback: types.CallbackQuery, bot: Bot):
+    id = int(callback.data.split('_')[1])
+    # Удаляем задачу из базы данных
+    output = await DB.get_output(id)
+    user_id = output[1]
+    await DB.delete_output(id)
+    await callback.message.edit_text("❌ Отклонено")
+    await bot.send_message(chat_id=user_id, text='☹ Ваша заявка на вывод отклонена', reply_markup=back_menu_kb())
+    outputs = await DB.get_rub_outputs()
+    rubpage = 1
+
+    tasks_on_page, total_pages = paginate_rub_tasks(outputs, rubpage)
+    keyboard = generate_rub_keyboard(tasks_on_page, rubpage, total_pages)
+    await callback.message.edit_text("Список заявок на вывод в <b>рублях</b>", reply_markup=keyboard)
+
+
+@admin.callback_query(lambda c: c.data.startswith("rubsuc_"))
+async def delete_task_handler(callback: types.CallbackQuery, bot: Bot):
+    id = int(callback.data.split('_')[1])
+
+    output = await DB.get_output(id)
+    user_id = output[1]
+    await DB.delete_output(id)
+    await callback.message.edit_text("✅ Выполнено")
+    await bot.send_message(chat_id=user_id, text='🥳 Ваша заявка на вывод одобрена!', reply_markup=back_menu_kb())
+    outputs = await DB.get_rub_outputs()
+    rubpage = 1
+
+    tasks_on_page, total_pages = paginate_rub_tasks(outputs, rubpage)
+    keyboard = generate_rub_keyboard(tasks_on_page, rubpage, total_pages)
+    await callback.message.edit_text("Список заявок на вывод в <b>рублях</b>", reply_markup=keyboard)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -130,13 +618,20 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
     task_id = int(callback.data.split('_')[1])
     task = await DB.get_chating_task_by_id(task_id)
 
-    price = task[2]
 
-    invite_link = await check_admin_and_get_invite_link(bot, task[1])
-    chat_id = task[1]
-    chat = await bot.get_chat(chat_id)
+    try:
+        chat_id = task[1]
+        price = task[2]
+        chat = await bot.get_chat(chat_id)
+        invite_link = await check_admin_and_get_invite_link(bot, task[1])
+        chat_title = chat.title
+    except:
+        chat_title = '<i>Ошибка</i>'
+        invite_link = '<i>Ошибка</i>'
+        price = '<i>Ошибка</i>'
+
     task_info = f"""
-Чат - {chat.title}
+Чат - {chat_title}
 
 💰 Плата за 1 сообщение - {price} MITcoin 
 
@@ -299,7 +794,7 @@ async def get_user_profile(message: types.Message, state: FSMContext):
         if user:
 
             balance = user['balance'] if user['balance'] is not None else 0
-
+            rub_balance = user['rub_balance'] if user['rub_balance'] is not None else 0
             # Задания пользователя
             tasks = await DB.get_tasks_by_user_admin(user_id)
 
@@ -323,7 +818,8 @@ async def get_user_profile(message: types.Message, state: FSMContext):
             profile_text = f"""
 🆔 ID - <code>{user_id}</code> / <a href='tg://user?id={user_id}'>КЛИК</a>
 
-💵 Баланс - {balance}
+💵 MitCoin - {balance} $MICO
+💵 Рубли - {rub_balance}₽
 
 💼 Задания:
 {'\n'.join(chanel_tasks)}
@@ -342,7 +838,7 @@ async def get_user_profile(message: types.Message, state: FSMContext):
             # Создание клавиатуры
             builder = InlineKeyboardBuilder()
             builder.add(types.InlineKeyboardButton(text="✏ Баланс", callback_data=f'update_balance:{user_id}'))
-
+            builder.add(types.InlineKeyboardButton(text="✏ Руб Баланс", callback_data=f'update_rub_balance:{user_id}'))
             await message.answer(profile_text, reply_markup=builder.as_markup())
         else:
             await message.answer('Пользователь не найден 😓')
@@ -378,7 +874,6 @@ async def update_balance_handler(callback: types.CallbackQuery, state: FSMContex
 
 
 
-
 @admin.message(AdminActions.update_balance)
 async def set_new_balance(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -387,6 +882,36 @@ async def set_new_balance(message: types.Message, state: FSMContext):
     await DB.update_balance(user_id, balance=new_balance)
     await message.answer(f"Баланс пользователя {user_id} обновлен до {new_balance}.")
     await state.clear()
+
+
+
+
+
+
+
+@admin.callback_query(lambda c: c.data.startswith('update_rub_balance:'))
+async def update_rub_balance_handler(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.data.split(':')[1]
+    await state.update_data(user_id=user_id)
+    await callback.message.answer('Введите новый баланс пользователя в рублях:')
+    await state.set_state(AdminActions.update_rub_balance)
+    await callback.answer()
+
+
+
+
+@admin.message(AdminActions.update_rub_balance)
+async def set_new_rub_balance(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    user_id = data['user_id']
+    new_balance = int(message.text)
+    await DB.update_rub_balance(user_id, rub_balance=new_balance)
+    await message.answer(f"Баланс (Рубли) пользователя {user_id} обновлен до {new_balance}.")
+    await state.clear()
+
+
+
+
 
 
 
@@ -438,7 +963,7 @@ async def chating_tasks_handler(callback: types.CallbackQuery):
     tasks = await DB.get_op_tasks()
     # Начинаем с первой страницы
     oppage = 1
-    tasks_on_page, total_pages = paginate_tasks(tasks, oppage)
+    tasks_on_page, total_pages = paginate_op_tasks(tasks, oppage)
     # Генерируем инлайн кнопки
     keyboard = generate_op_tasks_keyboard(tasks_on_page, oppage, total_pages)
     await callback.message.edit_text("Каналы/чаты в ОП", reply_markup=keyboard)
@@ -453,7 +978,7 @@ async def change_page_handler(callback: types.CallbackQuery):
     tasks = await DB.get_op_tasks()
 
     # Получаем задания на нужной странице
-    tasks_on_page, total_pages = paginate_tasks(tasks, oppage)
+    tasks_on_page, total_pages = paginate_op_tasks(tasks, oppage)
 
     # Генерируем инлайн кнопки
     keyboard = generate_op_tasks_keyboard(tasks_on_page, oppage, total_pages)
@@ -662,14 +1187,71 @@ async def check_admin_and_get_invite_link_report(bot, chat_id):
 async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
     await callback.answer()
     report_id = int(callback.data.split('_')[1])
-    report = await DB.get_report(report_id)
+    try:
+        report = await DB.get_report(report_id)
+    except:
+        await callback.message.answer('Ошибка получения информации о репорте')
+        return
+    try:
+        reporter = report[3]
+    except:
+        reporter = "Неизвестный, рекомендую удалить репорт"
 
-    reporter = report[3]
-    task_id = report[1]
-    chat_id = report[2]
-    report_id = report[0]
+    try:
+        task_id = report[1]
+        chat_id = report[2]
+        report_id = report[0]
+    except:
+        task_id = "Неизвестное задание, рекомендую удалить репорт"
+        chat_id = "Неизвестный чат айди, рекомендую удалить репорт"
+        report_id = "Неизвестный репорт, рекомендую удалить репорт"
 
-    task = await DB.get_task_by_id(task_id)
+    try:
+        task = await DB.get_task_by_id(task_id)
+        if task is None:
+            keyboard_builder = InlineKeyboardBuilder()
+            # Добавляем кнопки
+            keyboard_builder.add(
+                InlineKeyboardButton(text="❌ Удалить задание", callback_data=f"reporttaskdelete_{task_id}_{report_id}"),
+                InlineKeyboardButton(text="❌💵 Удалить задание (+возврат MIT) ",
+                                     callback_data=f"taskcashbackdelete_{task_id}_{report_id}"),
+                InlineKeyboardButton(text="❌⚠️ Удалить задание (+ БАН)",
+                                     callback_data=f"taskbandelete_{task_id}_{report_id}"),
+                InlineKeyboardButton(text="🗑️ Удалить репорт", callback_data=f"reportdelete_{report_id}"),
+                InlineKeyboardButton(text="🔙 Назад", callback_data="reports_list_menu")
+
+            )
+
+            # Устанавливаем количество кнопок в ряду (1 кнопка на ряд)
+            keyboard_builder.adjust(1)
+            # Получаем клавиатуру
+            keyboard = keyboard_builder.as_markup()
+            await callback.message.answer(f'Не удалось получить информацию о задании, ошибка',
+                                          reply_markup=keyboard)
+            return
+
+    except Exception as e:
+        task = None
+        keyboard_builder = InlineKeyboardBuilder()
+        # Добавляем кнопки
+        keyboard_builder.add(
+            InlineKeyboardButton(text="❌ Удалить задание", callback_data=f"reporttaskdelete_{task_id}_{report_id}"),
+            InlineKeyboardButton(text="❌💵 Удалить задание (+возврат MIT) ",
+                                 callback_data=f"taskcashbackdelete_{task_id}_{report_id}"),
+            InlineKeyboardButton(text="❌⚠️ Удалить задание (+ БАН)",
+                                 callback_data=f"taskbandelete_{task_id}_{report_id}"),
+            InlineKeyboardButton(text="🗑️ Удалить репорт", callback_data=f"reportdelete_{report_id}"),
+            InlineKeyboardButton(text="🔙 Назад", callback_data="reports_list_menu")
+
+        )
+
+        # Устанавливаем количество кнопок в ряду (1 кнопка на ряд)
+        keyboard_builder.adjust(1)
+        # Получаем клавиатуру
+        keyboard = keyboard_builder.as_markup()
+        await callback.message.answer(f'Не удалось получить информацию о задании, ошибка - {e}', reply_markup=keyboard)
+        return
+
     if task[1]:
         user_id_creator = task[1]
     else:
@@ -839,30 +1421,125 @@ async def upload_handler(callback: types.CallbackQuery, bot: Bot):
     await callback.answer()
 
 
+
+
+
+
 @admin.callback_query(F.data == 'mailing')
 async def mailing_handler(callback: types.CallbackQuery, state: FSMContext):
     builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="Назад", callback_data='cancel_all_admin'))
+    builder.add(
+        types.InlineKeyboardButton(text="Назад", callback_data='back_admin_not_clear'),
+        types.InlineKeyboardButton(text="Остановить", callback_data='stop_mailing')
+    )
     await callback.message.answer('Отправьте сообщение для рассылки', reply_markup=builder.as_markup())
     await state.set_state(MailingStates.message)
     await callback.answer()
-
 
 @admin.message(MailingStates.message)
 async def mailing_get_msg(message: types.Message, state: FSMContext, bot: Bot):
     text = message.text
     users = await DB.select_all()
+    if not users:
+        await message.answer("❌ Нет пользователей для рассылки.")
+        await state.clear()
+        return
+
+    total_users = len(users)
+    completed_users = 0
+    dead_users = 0
+
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        types.InlineKeyboardButton(text="Назад", callback_data='back_admin_not_clear'),
+        types.InlineKeyboardButton(text="Остановить", callback_data='stop_mailing')
+    )
+
+    progress_message = await message.answer(
+        f"📤 <b>Рассылка началась</b>\n\n"
+        f"Общее количество пользователей: {total_users}\n",
+        reply_markup=builder.as_markup()
+    )
+
+    await state.set_state(MailingStates.progress)
+    await state.update_data(stop_flag=False)
+
+    async def update_progress():
+        previous_text = None
+        while True:
+            data = await state.get_data()
+            if data.get('stop_flag', False):
+                break
+            await asyncio.sleep(5)
+            current_text = (
+                f"📤 <b>Рассылка в процессе...</b>\n\n"
+                f"Общее количество пользователей: {total_users}\n"
+                f"✅ Успешно отправлено: {completed_users}\n"
+                f"💀 Мертвые пользователи: {dead_users}"
+            )
+            if current_text != previous_text:
+                try:
+                    await progress_message.edit_text(
+                        current_text,
+                        reply_markup=builder.as_markup()
+                    )
+                    previous_text = current_text
+                except TelegramBadRequest as e:
+                    if "message is not modified" in str(e):
+                        continue
+                    raise
+
+    asyncio.create_task(update_progress())
 
     for user in users:
+        data = await state.get_data()
+        if data.get('stop_flag', False):
+            break
         try:
-            await bot.copy_message(chat_id=int(user['user_id']), from_chat_id=message.from_user.id,
-                                   message_id=message.message_id, reply_markup=back_menu_kb())
+            await bot.copy_message(
+                chat_id=int(user['user_id']),
+                from_chat_id=message.from_user.id,
+                message_id=message.message_id,
+                reply_markup=back_menu_kb()
+            )
+            completed_users += 1
+            await asyncio.sleep(0.1)
         except TelegramForbiddenError:
-            await state.clear()
-            await message.answer('Возможно есть ошибка рассылки! (например, если какой-то юзер кинул бота в чс)')
+            dead_users += 1
+
+        except Exception as e:
+            dead_users += 1
+            print(f"Ошибка при отправке пользователю {user['user_id']}: {e}")
 
     await state.clear()
-    await message.answer('Рассылка закончена!')
+    await progress_message.answer(
+        f"<b>Рассылка завершена</b>\n\n"
+        f"Общее количество пользователей: {total_users}\n"
+        f"✅ Успешно отправлено: {completed_users}\n"
+        f"💀 Мертвые пользователи: {dead_users}",
+        reply_markup=builder.as_markup()
+    )
+
+@admin.callback_query(F.data == 'stop_mailing')
+async def stop_mailing(callback: types.CallbackQuery, state: FSMContext):
+    await state.update_data(stop_flag=True)
+    await callback.message.edit_text("❌ Рассылка остановлена")
+    await callback.answer("Рассылка остановлена.")
+
+
+
+
+
+
+
+
+
+@admin.callback_query(F.data == 'back_admin_not_clear')
+async def mailing_handler(callback: types.CallbackQuery, state: FSMContext):
+
+    if callback.from_user.id in ADMINS_ID:
+        await callback.message.edit_text('Админ панель', reply_markup=admin_kb())
+
 
 @admin.callback_query(F.data == 'back_admin')
 async def mailing_handler(callback: types.CallbackQuery, state: FSMContext):
