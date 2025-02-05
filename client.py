@@ -17,7 +17,9 @@ from kb import menu_kb, back_menu_kb, profile_kb, pr_menu_kb, pr_menu_canc, work
 import uuid
 from config import CRYPTOBOT_TOKEN
 import datetime
+import pytz
 from aiocryptopay import AioCryptoPay, Networks
+import requests
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,6 +28,11 @@ client = Router()
 
 task_cache = {}
 task_cache_chat = {}
+
+
+
+MOSCOW_TZ = pytz.timezone("Europe/Moscow")
+
 
 
 class create_tasks(StatesGroup):
@@ -51,7 +58,18 @@ class checks(StatesGroup):
     multi_check_amount = State()
     check_discription = State()
     check_lock_user = State()
-    check_password = State()
+    check_password1 = State()
+
+class convertation(StatesGroup):
+    mittorub = State()
+
+class output(StatesGroup):
+    rub1 = State()
+    usdt1 = State()
+    usdt = State()
+    rub = State()
+
+
 
 @client.message(F.text.startswith('/start'))
 async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
@@ -75,9 +93,9 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
             await DB.add_user(message.from_user.id, message.from_user.username)
             if referrer_id:
                 await DB.update_user(message.from_user.id, referrer_id=referrer_id)
-                await DB.add_balance(referrer_id, 100)
+                await DB.add_balance(referrer_id, 1000)
                 await DB.record_referral_earnings(referrer_id=referrer_id, referred_user_id=message.from_user.id,
-                                                  amount=100)
+                                                  amount=1000)
                 await bot.send_message(referrer_id,
                                        f"👤 Пользователь c ID {message.from_user.id} перешел по вашей реферальной ссылке",
                                        reply_markup=back_menu_kb())
@@ -86,22 +104,32 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
             # Активация чека
             check = await DB.get_check_by_uid(check_uid)
             if check and not await DB.is_check_activated(message.from_user.id, check_uid) and check[2] != message.from_user.id:
-
+                usname = message.from_user.username
                 if check[3] == 1:  # Сингл-чек
-                    if check[7] and check[7] != message.from_user.id:
-                        await message.answer("❌ <b>Этот чек предназначен для другого пользователя</b>", reply_markup=back_menu_kb())
-                        return
+
+                    if check[7]:
+
+                        if (check[7])[0] == '@':
+
+                            if check[7] != f'@{usname}':
+                                await message.answer("❌ <b>Этот чек предназначен для другого пользователя</b>", reply_markup=back_menu_kb())
+                                return
+                        elif check[7] != message.from_user.id:
+                            await message.answer("❌ <b>Этот чек предназначен для другого пользователя1</b>",
+                                                 reply_markup=back_menu_kb())
+                            return
+
                     await DB.add_balance(message.from_user.id, check[4])
                     await DB.process_check_activation(check_uid)
                     await DB.add_activated_check(message.from_user.id,check_uid)
                     await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
-                    usname = message.from_user.username
+
                     name = message.from_user.full_name
                     if usname == None:
                         usname = name
                     else:
                         usname = f'@{usname}'
-                    await bot.send_message(check[2], text=f'💸 <b>Ваш одноразовый чек на {check[4]} Mit Coin был активирован пользователем {usname}</b>')
+                    await bot.send_message(check[2], text=f'💸 <b>Ваш одноразовый чек на {check[4]} Mit Coin был активирован пользователем {usname}</b>', reply_markup=back_menu_kb())
                     return
 
                 elif check[3] == 2:  # Мульти-чек
@@ -109,7 +137,7 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
                     if check[5] > 0:
                         if check[8]:  # Если требуется пароль
                             await message.answer("🔑 <b>Для получения чека необходимо ввести пароль:</b>", reply_markup=back_menu_kb())
-                            await state.set_state(checks.check_password)
+                            await state.set_state(checks.check_password1)
                             await state.update_data(check_uid=check_uid)
                             return
 
@@ -154,7 +182,7 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
         await message.answer("Для получения информации используйте бота в личных сообщениях.")
 
 
-@client.message(checks.check_password)
+@client.message(checks.check_password1)
 async def handle_check_password(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     check_uid = user_data.get("check_uid")
@@ -194,14 +222,17 @@ async def profile_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     user = await DB.select_user(user_id)
     balance = user['balance']
+    rub_balance = user['rub_balance']
     if balance is None:
         balance = 0
     await callback.answer()
     await callback.message.edit_text(f'''
-👀 <b>Мой профиль:</b>
+👀 <b>Профиль:</b>
 
-🪪 ID - <code>{user_id}</code>
-💰 Баланс - {balance} MITcoin
+🪪 <b>ID</b> - <code>{user_id}</code>
+
+💰 Баланс ($MICO) - {balance} MitCoin
+💳 Баланс (рубли) - {rub_balance} ₽
     ''', reply_markup=profile_kb())
 
 
@@ -313,20 +344,444 @@ async def refki_handler(callback: types.CallbackQuery):
 3) для удаления всех ОП используйте /unsetup 
 или /unsetup @канал для удаления конкретного канала 
 4) список всех активных ОП в чате - /status
-        """,
-                                     reply_markup=back_menu_kb())
+        """,reply_markup=back_menu_kb())
+
+@client.callback_query(F.data == 'bonus_menu')
+async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    await callback.answer()
+    user_id = callback.from_user.id
+    ops = await DB.get_bonus_ops()
+
+
+    unsubscribed_channels = []
+    if ops:
+        for op in ops:
+            channel_id = op[1]
+            link = op[2]
+            if not await is_user_subscribed(user_id, channel_id, bot):
+                unsubscribed_channels.append(link)
+
+        # Если есть каналы, на которые нужно подписаться
+    if unsubscribed_channels:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Подписаться", url=channel) for channel in unsubscribed_channels],
+            [InlineKeyboardButton(text="✅ Проверить", callback_data='bonus_proverka')],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')]
+        ])
+
+        # Формируем список каналов для текстового сообщения
+        channels_list = "\n".join(
+            [f"{channel}" for channel in unsubscribed_channels])
+
+        await callback.message.edit_text(f"🎁 <b>Подпишитесь на следующие каналы для получения бонуса</b>\n<i>(после подписки перезайдите в этот раздел для получения бонуса):</i>\n\n{channels_list}", reply_markup=keyboard, disable_web_page_preview=True)
+        return
+
+    last_bonus_date = await DB.get_last_bonus_date(user_id)
+    today = datetime.datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    if last_bonus_date == today:
+        await callback.message.edit_text("❌ <b>Бонус можно получить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность получения бонуса обновляется в 00:00 по МСК)</i>", reply_markup=back_menu_kb())
+        return
+
+    await DB.update_last_bonus_date(user_id)
+    await DB.add_balance(user_id, 5000)
+    await callback.answer('+5000 $MICO')
+    await callback.message.edit_text(f"🎁 <b>Вы получили ежедневный бонус в размере 5000 $MICO</b>\n\nВозвращайтесь завтра 😉", reply_markup=back_menu_kb())
+
+
+
+@client.callback_query(F.data == 'bonus_proverka')
+async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    await callback.answer()
+    user_id = callback.from_user.id
+    ops = await DB.get_bonus_ops()
+
+
+    unsubscribed_channels = []
+    if ops:
+        for op in ops:
+            channel_id = op[1]
+            link = op[2]
+            if not await is_user_subscribed(user_id, channel_id, bot):
+                unsubscribed_channels.append(link)
+
+        # Если есть каналы, на которые нужно подписаться
+    if unsubscribed_channels:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Подписаться", url=channel) for channel in unsubscribed_channels],
+            [InlineKeyboardButton(text="✅ Проверить", callback_data='bonus_proverka')],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')]
+        ])
+
+        # Формируем список каналов для текстового сообщения
+        channels_list = "\n".join(
+            [f"{channel}" for channel in unsubscribed_channels])
+
+        await callback.message.edit_text(f"🎁 <b>Подпишитесь на следующие каналы для получения бонуса</b>\n<i>(после подписки перезайдите в этот раздел для получения бонуса):</i>\n\n{channels_list}", reply_markup=keyboard, disable_web_page_preview=True)
+        return
+
+    last_bonus_date = await DB.get_last_bonus_date(user_id)
+    today = datetime.datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    if last_bonus_date == today:
+        await callback.message.edit_text("❌ <b>Бонус можно получить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность получения бонуса обновляется в 00:00 по МСК)</i>", reply_markup=back_menu_kb())
+        return
+
+    await DB.update_last_bonus_date(user_id)
+    await DB.add_balance(user_id, 5000)
+    await callback.answer('+5000 $MICO')
+    await callback.message.edit_text(f"🎁 <b>Вы получили ежедневный бонус в размере 5000 $MICO</b>\n\nВозвращайтесь завтра 😉", reply_markup=back_menu_kb())
+
+
+
+
+@client.callback_query(F.data == 'output_menu')
+async def outputmenu(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+
+    add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='profile')
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button2]])
+    await callback.message.edit_text(f'''
+<b>😢 На данный момент вывод недоступен, следите за новостями в @mitcoinnews</b>
+    ''', reply_markup=keyboard)
+
+
+
+@client.callback_query(F.data == 'output_menuF')
+async def outputmenu(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    user_id = callback.from_user.id
+    user = await DB.select_user(user_id)
+    rub_balance = user['rub_balance']
+
+    add_button1 = InlineKeyboardButton(text=f"💲 USDT", callback_data=f'usdt_output_menu')
+    add_button3 = InlineKeyboardButton(text=f"Рубли (только для РФ)", callback_data=f'rub_output_menu')
+    add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='profile')
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button3], [add_button2]])
+    await callback.message.edit_text(f'''
+⚡ В данном разделе Вы можете произвести вывод ваших средств с баланса в рублях <i>(рубли можно получить при помощи конвертации)</i>
+
+<span class="tg-spoiler"><b>Лимиты:</b>
+Вывод в USDT - от 2.5$ 
+Вывод в рублях - от 250₽</span>
+
+⚠ Вывод производится в течении 3 рабочих дней
+
+<b>Выберите способ вывода:</b>
+    ''', reply_markup=keyboard)
+
+
+@client.callback_query(F.data == 'usdt_output_menuF')
+async def outputusdtmenu(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    user = await DB.select_user(user_id)
+    rub_balance = user['rub_balance']
+
+    data_cbr = requests.get('https://www.cbr-xml-daily.ru/daily_json.js').json()
+    usd_data = data_cbr['Valute']['USD']
+    usd = usd_data['Value']
+    usd = int(usd)
+    user_usdt = rub_balance/usd
+
+    print(user_usdt)
+    if user_usdt < 2.5:
+        await callback.message.edit_text(f"😢 <b>Недостаточно средств на балансе</b>\n\nНа вашем балансе {round(user_usdt, 3)}$, минимальная сумма <b>должна быть более 2.5$</b>", reply_markup=back_profile_kb())
+        return
+
+
+    add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')
+    # Создаем клавиатуру и добавляем в нее кнопку
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button2]])
+    await callback.message.edit_text(f'💳 Укажите сумму <b>от 2.5 до {round(user_usdt, 3)} USDT</b>, которую вы хотите вывести', reply_markup=keyboard)
+    await state.set_state(output.usdt)
+    await state.update_data(usd=usd, user_usdt=user_usdt)
+
+
+
+@client.message(output.usdt)
+async def outputusdtmenu1(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    try:
+        text = float(message.text)
+    except ValueError:
+        await message.answer("<b>Введите целое число</b>",reply_markup=back_menu_kb())
+        return
+
+    statedata = await state.get_data()
+    usd = statedata['usd']
+    user_usdt = statedata['user_usdt']
+
+    if text < 2.5 or text > user_usdt:
+        await message.answer(f'❗ Укажите сумму <b>от 2.5 до {user_usdt} USDT</b>', reply_markup=back_menu_kb())
+        return
+    await state.clear()
+    await state.set_state(output.usdt1)
+    await state.update_data(usd=usd, user_usdt=user_usdt, amount=text)
+
+    await message.answer(f'👛 Теперь укажите Ваш кошелёк <b>USDT (BEP20)</b>, на который будет произведен вывод\n\n‼ <b>Внимание! При некорректном адресе кошелька/неверной сети - сумма вывода возвращена НЕ будет</b>', reply_markup=back_menu_kb())
+
+
+
+
+
+@client.message(output.usdt1)
+async def outputusdtmenu11(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    statedata = await state.get_data()
+    usd = statedata['usd']
+    amount = statedata['amount']
+
+    try:
+        wallet = str(message.text)
+
+        if len(wallet) < 5 or len(wallet) > 50:
+            await message.answer("‼ <b>Введите корректный адрес кошелька</b>", reply_markup=back_menu_kb())
+            return
+
+    except:
+        await message.answer("‼ <b>Введите корректный адрес кошелька</b>",reply_markup=back_menu_kb())
+        return
+
+
+    usd = int(usd)
+    sum = amount * usd
+    sum = int(sum)
+
+    await message.answer(f'🥳 <b>Заявка на вывод на {amount} USDT создана!</b>\nС вашего баланса списано {sum}₽', reply_markup=back_menu_kb())
+
+    await DB.add_rub_balance(user_id=user_id, amount=-sum)
+    await DB.add_output(user_id=user_id, amount=amount, wallet=wallet, type=1)
+    await state.clear()
+
+
+
+
+
+
+
+
+
+
+@client.callback_query(F.data == 'rub_output_menu')
+async def outputrubmenu(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    user = await DB.select_user(user_id)
+    rub_balance = user['rub_balance']
+
+
+    if rub_balance < 250:
+        await callback.message.edit_text(f"😢 <b>Недостаточно средств на балансе</b>\n\nНа вашем балансе {rub_balance}₽, минимальная сумма <b>должна быть 250₽ или более</b>", reply_markup=back_profile_kb())
+        return
+
+
+    add_button = InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button]])
+    await callback.message.edit_text(f'💳 Укажите сумму <b>от 250₽ до {rub_balance}₽</b>, которую вы хотите вывести (целое число)', reply_markup=keyboard)
+    await state.set_state(output.rub)
+
+
+@client.message(output.rub)
+async def outputrubmenu1(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    user = await DB.select_user(user_id)
+    rub_balance = user['rub_balance']
+    try:
+        text = int(message.text)
+    except ValueError:
+        await message.answer("<b>Введите число</b>", reply_markup=back_menu_kb())
+        return
+
+    if text < 250 or text > rub_balance:
+        await message.answer(f'❗ Укажите сумму <b>от 250₽ до {rub_balance}₽</b>', reply_markup=back_menu_kb())
+        return
+
+    await state.clear()
+    await state.set_state(output.rub1)
+    await state.update_data(amount=text)
+
+    await message.answer(f'👛 Теперь укажите номер <b>банковской карты/телефона</b> (для перевода по СБП), а так же <b>имя и фамилию получателя</b>\n\n‼ <b>Внимание! При некорректном номере карты/телефона - сумма вывода возвращена НЕ будет</b>', reply_markup=back_menu_kb())
+
+
+@client.message(output.rub1)
+async def outputrubmenu11(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    statedata = await state.get_data()
+    amount = statedata['amount']
+    try:
+        wallet = str(message.text)
+        if len(wallet) > 100 or len(wallet) < 5:
+            await message.answer("‼ <b>Введите корректный номер карты/телефона</b>", reply_markup=back_menu_kb())
+            return
+
+    except:
+        await message.answer("‼ <b>Введите корректный номер карты/телефона</b>", reply_markup=back_menu_kb())
+        return
+
+    await message.answer(f'🥳 <b>Заявка на вывод на {amount}₽ создана!</b>\nС вашего баланса списано {amount} рублей', reply_markup=back_menu_kb())
+
+    await DB.add_rub_balance(user_id=user_id, amount=-amount)
+    await DB.add_output(user_id=user_id, amount=amount, wallet=wallet, type=2)
+    await state.clear()
+
+
+
+
+
+
+
+
+
 
 
 @client.callback_query(F.data == 'corvertation')
 async def corvertation_handler(callback: types.CallbackQuery):
     await callback.answer()
+    user_id = callback.from_user.id
+    last_conversion_date = await DB.get_last_conversion_date(user_id)
+    today = datetime.datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    if last_conversion_date == today:
+        await callback.message.edit_text("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_profile_kb())
+        return
+    add_button1 = InlineKeyboardButton(text="Продолжить!", callback_data='mittorub')
+    add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='profile')
+    # Создаем клавиатуру и добавляем в нее кнопку
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button2]])
     await callback.message.edit_text('''
-Конвертация в разработке и в скором времени появится в нашем боте. 
+🌀 <b>Вы можете конвертировать ваши $MICO в рубли!</b>
 
-Вы сможете конвертировать свои MitCoin в рубли и выводить их любым доступным способом. 
+<i>Конвертацию можно проводить не более 1 раза в день и не более чем на 1% от баланса</i>
+    ''', reply_markup=keyboard)
 
-Следите за обновлениями в нашем канале @mitcoinnews    
-    ''', reply_markup=back_menu_kb())
+@client.callback_query(F.data == 'mittorub')
+async def corvertation_rubtomit_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    user_id = callback.from_user.id
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+
+    print(mit_balance)
+
+    last_conversion_date = await DB.get_last_conversion_date(user_id)
+    today = datetime.datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    if last_conversion_date == today:
+        await message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_profile_kb())
+        return
+
+    if mit_balance is None or mit_balance == 0:
+        await callback.message.edit_text('😢 <b>У вас недостаточно $MICO для осуществления конвертации</b>', reply_markup=back_profile_kb())
+
+    maxprocent = mit_balance // 100
+
+    if maxprocent < 1000:
+        await callback.message.edit_text('😢 <b>У вас недостаточно $MICO для осуществления конвертации</b>', reply_markup=back_profile_kb())
+
+
+    add_button1 = InlineKeyboardButton(text=f"Максимально ({maxprocent} $MICO)", callback_data=f'convert_{maxprocent}')
+    add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button2]])
+
+    await callback.message.edit_text(f'''
+❓ <b>Сколько $MICO (MitCoin) вы хотите конвертировать в рубли?</b>
+
+<i>Максимальная сумма: 1% от MitCoin баланса</i> - {maxprocent}
+    ''', reply_markup=keyboard)
+
+    await state.set_state(convertation.mittorub)
+    await state.update_data(maxprocent=maxprocent)
+
+
+@client.message(convertation.mittorub)
+async def corvertation_rubtomit_input(message: types.Message, state: FSMContext):
+    maxprocent = await state.get_data()
+    maxprocent = maxprocent['maxprocent']
+    print(f'макс процент {maxprocent}')
+
+    try:
+        convert_amount = int(message.text)
+        await state.clear()
+    except ValueError:
+        await message.reply("❌ Введено некорректное значение, пожалуйста, введите число.", reply_markup=back_menu_kb())
+        return
+
+    user_id = message.from_user.id
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+    rub_balance = user['rub_balance']
+
+
+    last_conversion_date = await DB.get_last_conversion_date(user_id)
+    today = datetime.datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+
+    if last_conversion_date == today:
+        await message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_menu_kb())
+        return
+
+    if convert_amount > maxprocent:
+        await message.answer('❌ Вы не можете конвертировать больше 1% от своего $MICO баланса', reply_markup=back_menu_kb())
+        return
+
+    if convert_amount < 1000:
+        await message.answer('❌ Невозможно конвертировать сумму меньше 1000 $MICO', reply_markup=back_menu_kb())
+        return
+
+
+    add_rub_balance = convert_amount//1000  # 1000 $MICO = 1 рубль
+    await DB.add_rub_balance(user_id, add_rub_balance)
+    await DB.add_balance(user_id, -convert_amount)
+    await DB.update_last_conversion_date(user_id)
+
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+    rub_balance = user['rub_balance']
+
+    await message.answer(f"✅ <b>Вы успешно конвертировали {convert_amount} $MICO в {add_rub_balance}₽</b>\n\n"
+                                     f"💰 <b>Текущий баланс:</b>\nMitCoin - {mit_balance} $MICO;\nРубли - {rub_balance}₽", reply_markup=back_menu_kb())
+
+
+
+
+@client.callback_query(lambda c: c.data.startswith("convert_"))
+async def corvertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
+    user_id = callback.from_user.id
+    convert_amount = int(callback.data.split('_')[1])  # Начальная страница
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+    rub_balance = user['rub_balance']
+    maxprocent = mit_balance // 100
+
+    last_conversion_date = await DB.get_last_conversion_date(user_id)
+    today = datetime.datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+
+    if last_conversion_date == today:
+        await callback.message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_menu_kb())
+        return
+
+    if convert_amount > maxprocent:
+        await callback.message.edit_text('❌ Вы не можете конвертировать больше 1% от своего $MICO баланса', reply_markup=back_menu_kb())
+        return
+
+    if convert_amount < 1000:
+        await callback.message.edit_text('❌ Невозможно конвертировать сумму меньше 1000 $MICO', reply_markup=back_menu_kb())
+        return
+
+
+    add_rub_balance = convert_amount//1000  # 1000 $MICO = 1 рубль
+    await DB.add_rub_balance(user_id, add_rub_balance)
+    await DB.add_balance(user_id, -convert_amount)
+    await DB.update_last_conversion_date(user_id)
+
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+    rub_balance = user['rub_balance']
+
+    await callback.message.edit_text(f"✅ <b>Вы успешно конвертировали {convert_amount} $MICO в {add_rub_balance}₽</b>\n\n"
+                                     f"💰 <b>Текущий баланс:</b>\nMitCoin - {mit_balance} $MICO;\nРубли - {rub_balance}₽", reply_markup=back_menu_kb())
+
+
+
+
+
+
+
+
 
 
 CRYPTOBOT_TESTNET = False  # Указываем, что это тестовая среда
@@ -619,7 +1074,7 @@ async def refki_handler(callback: types.CallbackQuery, bot: Bot):
 <b>Ваша реферальная ссылка:</b> \n<code>{ref_link}</code>\n
 ID того, кто пригласил: <code>{referrer_id}</code>\n
 
-<em>100 MITcoin за приглашенного пользователя</em>
+<em>1000 MITcoin за приглашенного пользователя</em>
 <em>15% за пополнения и выполнение заданий рефералом</em>
 
 Кол-во приглашенных пользователей: {len(referred_users)} 
@@ -655,8 +1110,8 @@ async def works_handler(callback: types.CallbackQuery, bot: Bot):
 
 
 # Создаем кэш для задач (хранится 1 минут)
-task_cache = TTLCache(maxsize=10000, ttl=300)
-task_cache_chat = TTLCache(maxsize=10000, ttl=420)
+task_cache = TTLCache(maxsize=100000, ttl=600)
+task_cache_chat = TTLCache(maxsize=100000, ttl=480)
 
 
 async def update_task_cache_for_all_users(bot, DB):
@@ -687,7 +1142,7 @@ async def cache_all_tasks(bot, DB):
                 try:
                     chat = await bot.get_chat(task[2])
                     invite_link = chat.invite_link
-                    if invite_link:
+                    if invite_link and task[3] > 0:
                         chat_title = chat.title
                         # Добавляем задание с названием канала, но без самой ссылки
                         tasks_with_links.append((*task, chat_title))
@@ -725,7 +1180,7 @@ async def get_cached_tasks_chat(bot, DB):
     async with semaphore:
         for task in all_tasks:
             invite_link = await check_admin_and_get_invite_link_chat(bot, task[2])
-            if invite_link:
+            if invite_link and task[3] > 0:
                 # Получаем информацию о чате и добавляем название канала
                 try:
                     chat = await bot.get_chat(task[2])
@@ -744,14 +1199,14 @@ async def scheduled_cache_update(bot, DB):
     """Функция для запуска обновления кэша задач раз в 5 минут."""
     while True:
         await update_task_cache_for_all_users(bot, DB)
-        await asyncio.sleep(300)  # Задержка в 300 секунд (5 минут)
+        await asyncio.sleep(600)  # Задержка в 300 секунд (5 минут)
 
 
 async def scheduled_cache_update_chat(bot, DB):
     """Функция для запуска обновления кэша задач раз в 5 минут."""
     while True:
         await update_task_cache_for_all_users_chat(bot, DB)
-        await asyncio.sleep(420)  # Задержка в 300 секунд (7 минут)
+        await asyncio.sleep(480)  # Задержка в 300 секунд (7 минут)
 
 
 # Запуск фоновой задачи в основном цикле
@@ -775,7 +1230,7 @@ async def taskss_handler(callback: types.CallbackQuery, bot: Bot):
     print(f'задания для пользователя {user_id} - {len(tasks)}')
     if tasks:
         # Сортируем задачи по количеству подписчиков
-        tasks.sort(key=lambda x: x[3], reverse=True)
+        random.shuffle(tasks)
         print(f'сортированные задания {user_id} - {len(tasks)}')
         # Пагинация и генерация клавиатуры
         tasks_on_page, total_pages = await paginate_tasks_chanel(tasks, chanelpage)
@@ -805,7 +1260,7 @@ async def change_page_handler(callback: types.CallbackQuery, bot: Bot):
     ]
     if tasks:
         # Сортируем задачи по количеству подписчиков
-        tasks.sort(key=lambda x: x[3], reverse=True)
+        random.shuffle(tasks)
 
         # Пагинация и генерация клавиатуры
         tasks_on_page, total_pages = await paginate_tasks_chanel(tasks, chanelpage)
@@ -898,6 +1353,10 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
     await callback.answer()
     task_id = int(callback.data.split('_')[1])
     task = await DB.get_task_by_id(task_id)
+    if task is None:
+        await callback.message.edit_text("❗ Задание не существует или уже выполнено", reply_markup=back_menu_kb())
+        await asyncio.sleep(1)
+
     user_id = callback.from_user.id
     target_id = task[2]
     invite_link = await check_admin_and_get_invite_link_chanel(bot, task[2])
@@ -922,23 +1381,29 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
             reply_markup=builder.as_markup())
         return
 
-    # Шаг 4. Обновляем задание (вычитаем amount на 1)
-    await DB.update_task_amount(task_id)
-    await DB.add_completed_task(user_id, task_id)
-    await DB.add_balance(amount=1500, user_id=user_id)
-    # Проверяем, нужно ли удалить задание
-    updated_task = await DB.get_task_by_id(task_id)
+    if not await DB.is_task_completed(user_id, task[0]):
 
-    if updated_task[3] == 0:
-        delete_task = await DB.get_task_by_id(task_id)
-        creator_id = delete_task[1]
-        await DB.delete_task(task_id)
-        await bot.send_message(creator_id, f"🎉 Одно из ваших заданий было успешно выполнено",
-                               reply_markup=back_menu_kb())
+        # Шаг 4. Обновляем задание (вычитаем amount на 1)
+        await DB.update_task_amount(task_id)
+        await DB.add_completed_task(user_id, task_id)
+        await DB.add_balance(amount=1500, user_id=user_id)
+        # Проверяем, нужно ли удалить задание
+        updated_task = await DB.get_task_by_id(task_id)
 
-    await callback.message.edit_text("✅")
-    await callback.answer("+1500")
-    await asyncio.sleep(2)
+        if updated_task[3] == 0:
+            delete_task = await DB.get_task_by_id(task_id)
+            creator_id = delete_task[1]
+            await DB.delete_task(task_id)
+            await bot.send_message(creator_id, f"🎉 Одно из ваших заданий было успешно выполнено",
+                                   reply_markup=back_menu_kb())
+
+        await callback.message.edit_text("✅")
+        await callback.answer("+1500")
+        await asyncio.sleep(2)
+    else:
+        await callback.message.edit_text("‼ Задание уже выполнено", reply_markup=back_menu_kb())
+        await callback.answer("Задание уже выполнено")
+        await asyncio.sleep(3)
 
     # Получаем все задачи с ссылками из кэша и фильтруем
     all_tasks = task_cache.get('all_tasks', [])
@@ -947,7 +1412,7 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
     ]
 
     if tasks:
-        tasks.sort(key=lambda x: x[3], reverse=True)
+        random.shuffle(tasks)
         chanelpage = 1
         tasks_on_page, total_pages = await paginate_tasks_chanel(tasks, chanelpage)
         keyboard = await generate_tasks_keyboard_chanel(tasks_on_page, chanelpage, total_pages, bot)
@@ -994,7 +1459,7 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
     ]
 
     if tasks:
-        tasks.sort(key=lambda x: x[3], reverse=True)
+        random.shuffle(tasks)
         chanelpage = 1
         tasks_on_page, total_pages = await paginate_tasks_chanel(tasks, chanelpage)
         keyboard = await generate_tasks_keyboard_chanel(tasks_on_page, chanelpage, total_pages, bot)
@@ -1018,7 +1483,7 @@ async def tasksschat_handler(callback: types.CallbackQuery, bot: Bot):
     ]
 
     if tasks:
-        tasks.sort(key=lambda x: x[3], reverse=True)
+        random.shuffle(tasks)
         tasks_on_page, total_pages = await paginate_tasks_chat(tasks, chatpage)
         keyboard = await generate_tasks_keyboard_chat(tasks_on_page, chatpage, total_pages, bot)
 
@@ -1045,7 +1510,7 @@ async def change_page_handler(callback: types.CallbackQuery, bot: Bot):
     ]
 
     if tasks:
-        tasks.sort(key=lambda x: x[3], reverse=True)
+        random.shuffle(tasks)
         tasks_on_page, total_pages = await paginate_tasks_chat(tasks, chatpage)
         keyboard = await generate_tasks_keyboard_chat(tasks_on_page, chatpage, total_pages, bot)
 
@@ -1138,6 +1603,9 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
     await callback.answer()
     task_id = int(callback.data.split('_')[1])
     task = await DB.get_task_by_id(task_id)
+    if task is None:
+        await callback.message.edit_text("❗ Задание не найдено или уже выполнено", reply_markup=back_menu_kb())
+        await asyncio.sleep(1)
     user_id = callback.from_user.id
     target_id = task[2]
     invite_link = await check_admin_and_get_invite_link_chat(bot, task[2])
@@ -1163,23 +1631,26 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
             reply_markup=builder.as_markup())
         return
 
-    # Шаг 4. Обновляем задание (вычитаем amount на 1)
-    await DB.update_task_amount(task_id)
-    await DB.add_completed_task(user_id, task_id)
-    await DB.add_balance(amount=1500, user_id=user_id)
-    # Проверяем, нужно ли удалить задание
-    updated_task = await DB.get_task_by_id(task_id)
-    if updated_task[3] == 0:
-        delete_task = await DB.get_task_by_id(task_id)
-        creator_id = delete_task[1]
-        await DB.delete_task(task_id)
-        await bot.send_message(creator_id, f"🎉 Одно из ваших заданий было успешно выполнено",
-                               reply_markup=back_menu_kb())
+    if not await DB.is_task_completed(user_id, task[0]):
+        # Шаг 4. Обновляем задание (вычитаем amount на 1)
+        await DB.update_task_amount(task_id)
+        await DB.add_completed_task(user_id, task_id)
+        await DB.add_balance(amount=1500, user_id=user_id)
+        # Проверяем, нужно ли удалить задание
+        updated_task = await DB.get_task_by_id(task_id)
+        if updated_task[3] == 0:
+            delete_task = await DB.get_task_by_id(task_id)
+            creator_id = delete_task[1]
+            await DB.delete_task(task_id)
+            await bot.send_message(creator_id, f"🎉 Одно из ваших заданий было успешно выполнено",
+                                   reply_markup=back_menu_kb())
 
-    await callback.message.edit_text("✅")
-    await callback.answer("+1500")
-    await asyncio.sleep(2)
-
+        await callback.message.edit_text("✅")
+        await callback.answer("+1500")
+        await asyncio.sleep(2)
+    else:
+        await callback.message.edit_text("‼ Вы уже выполнили это задание", reply_markup=back_menu_kb())
+        await asyncio.sleep(3)
     # Получаем все задачи с ссылками из кэша и фильтруем
     all_tasks = task_cache_chat.get('all_tasks', [])
     tasks = [
@@ -1187,7 +1658,7 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
     ]
 
     if tasks:
-        tasks.sort(key=lambda x: x[3], reverse=True)
+        random.shuffle(tasks)
         chatpage = 1
         tasks_on_page, total_pages = await paginate_tasks_chat(tasks, chatpage)
         keyboard = await generate_tasks_keyboard_chat(tasks_on_page, chatpage, total_pages, bot)
@@ -1234,7 +1705,7 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
     ]
 
     if tasks:
-        tasks.sort(key=lambda x: x[3], reverse=True)
+        random.shuffle(tasks)
         chatpage = 1
         tasks_on_page, total_pages = await paginate_tasks_chat(tasks, chatpage)
         keyboard = await generate_tasks_keyboard_chat(tasks_on_page, chatpage, total_pages, bot)
@@ -1248,7 +1719,7 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
 
 @client.callback_query(F.data == 'work_post')
 async def works_post_handler(callback: types.CallbackQuery, bot: Bot):
-    await callback.answer()
+
     user_id = callback.from_user.id
     all_tasks = await DB.select_post_tasks()  # Получаем список всех заданий
 
@@ -1437,7 +1908,7 @@ async def taskss_handler(callback: types.CallbackQuery):
     # Генерируем инлайн кнопки
     keyboard = await generate_tasks_keyboard(tasks_on_page, page, total_pages)
 
-    await callback.message.edit_text("💼 Ваши задания:", reply_markup=keyboard)
+    await callback.message.edit_text("💼 <b>Ваши задания:</b>", reply_markup=keyboard)
 
 
 @client.callback_query(lambda c: c.data.startswith("page_"))
@@ -1452,7 +1923,7 @@ async def change_page_handler(callback: types.CallbackQuery):
     # Генерируем инлайн кнопки
     keyboard = await generate_tasks_keyboard(tasks_on_page, page, total_pages)
 
-    await callback.message.edit_text("💼 Ваши задания:", reply_markup=keyboard)
+    await callback.message.edit_text("💼 <b>Ваши задания:</b>", reply_markup=keyboard)
 
 
 # Функция для проверки прав админа и генерации ссылки
@@ -1489,7 +1960,7 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
     if amount is None:
         amount = 1
     # Вычисляем стоимость задания
-    price_per_unit = {1: 2000, 2: 2000, 3: 300}
+    price_per_unit = {1: 1500, 2: 1500, 3: 300}
     cost = amount * price_per_unit.get(task[4], 0)
 
     # Если это канал или чат, проверяем права администратора и создаем ссылку
@@ -1542,7 +2013,7 @@ async def delete_task_handler(callback: types.CallbackQuery):
     amount = task[3]
     if amount is None:
         amount = 1
-    price_per_unit = {1: 2000, 2: 2000, 3: 300}
+    price_per_unit = {1: 1500, 2: 1500, 3: 300}
     cost = amount * price_per_unit.get(task[4], 0)
     user_id = callback.from_user.id
     user = await DB.select_user(user_id)
@@ -1561,7 +2032,7 @@ async def delete_task_handler(callback: types.CallbackQuery):
     tasks_on_page, total_pages = paginate_tasks(tasks, page)
     keyboard = await generate_tasks_keyboard(tasks_on_page, page, total_pages)
 
-    await callback.message.edit_text("💼 Ваши задания:", reply_markup=keyboard)
+    await callback.message.edit_text("💼 <b>Ваши задания:</b>", reply_markup=keyboard)
 
 
 @client.callback_query(F.data == 'chanel_pr_button')
@@ -1572,17 +2043,17 @@ async def pr_chanel_handler(callback: types.CallbackQuery, state: FSMContext):
     balance = user['balance']
     if balance is None:
         balance = 0
-    maxcount = balance // 2000
+    maxcount = balance // 1500
     await callback.message.edit_text(f'''
 📢 Реклама канала
 
-💹 2000 MITcoin = 1 подписчик
+💹 1500 MITcoin = 1 подписчик
 
 Баланс - {balance}; Всего вы можете купить {maxcount} подписчиков
 
 <b>Сколько нужно подписчиков</b>❓
 
-<em>Что бы создать задание на вашем балансе должно быть не менее 2000 MitCoin</em>
+<em>Что бы создать задание на вашем балансе должно быть не менее 1500 MitCoin</em>
     ''', reply_markup=pr_menu_canc())
     await state.set_state(create_tasks.chanel_task_create)
 
@@ -1597,7 +2068,7 @@ async def pr_chanel2(message: types.Message, state: FSMContext):
     try:
         uscount = int(message.text.strip())
         if uscount >= 1:
-            price = 2000 * uscount
+            price = 1500 * uscount
             await state.update_data(uscount=uscount, price=price, balance=balance)
             if balance >= price:
                 builder = InlineKeyboardBuilder()
@@ -1662,7 +2133,7 @@ async def pr_chanel4(message: types.Message, state: FSMContext, bot: Bot):
             user = await DB.select_user(user_id)
             balance = user['balance']
         if price is None:
-            price = 2000
+            price = 1500
 
         new_balance = balance - price
         # Проверка, не было ли уже создано задание в текущей сессии
@@ -1717,17 +2188,17 @@ async def pr_chat_handler(callback: types.CallbackQuery, state: FSMContext):
     balance = user['balance']
     if balance is None:
         balance = 0
-    maxcount = balance // 2000
+    maxcount = balance // 1500
     await callback.message.edit_text(f'''
 👥 Реклама чата
 
-💵 2000 MIT coin = 1 участник
+💵 1500 MIT coin = 1 участник
 
 Баланс - <b>{balance}</b>; Всего вы можете купить <b>{maxcount}</b> участников
 
 <b>Сколько нужно участников</b>❓
 
-<em>Что бы создать задание на вашем балансе должно быть не менее 2000 MITcoin</em>
+<em>Что бы создать задание на вашем балансе должно быть не менее 1500 MITcoin</em>
     ''', reply_markup=pr_menu_canc())
     await state.set_state(create_tasks.chat_task_create)
 
@@ -1742,7 +2213,7 @@ async def pr_chat2(message: types.Message, state: FSMContext):
     try:
         uscount = int(message.text.strip())
         if uscount >= 1:
-            price = 2000 * uscount
+            price = 1500 * uscount
             await state.update_data(uscount=uscount, price=price, balance=balance)
             if balance >= price:
                 builder = InlineKeyboardBuilder()
@@ -2293,12 +2764,13 @@ async def handler_chat_message(message: types.Message, bot: Bot):
                     [f"@{channel[1:]}" for channel in unsubscribed_channels])
 
                 # Отправляем сообщение с кнопками
-                await message.answer(f"""
+                msg = await message.answer(f"""
 <a href='tg://user?id={user_id}'>{name}</a>, <b>для того чтобы отправлять сообщения в этот чат, подпишитесь на указанные каналы:</b>
 
 {channels_list}
                 """, reply_markup=keyboard, disable_web_page_preview=True)
-
+                await asyncio.sleep(30)
+                await msg.delete()
 
 
 
@@ -2818,8 +3290,8 @@ async def delete_check_handler(callback: types.CallbackQuery):
 @client.callback_query(F.data == 'single_check')
 async def create_single_check(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-    user_balance_data = await DB.get_user_balance(user_id)
-    user_balance = user_balance_data[0] if user_balance_data else 0
+    user_balance = await DB.get_user_balance(user_id)
+
 
     if user_balance < 1010:
         builder = InlineKeyboardBuilder()
@@ -2855,8 +3327,9 @@ async def custom_check_amount(callback: types.CallbackQuery, state: FSMContext):
 @client.message(checks.single_check_create)
 async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
-    user_balance_data = await DB.get_user_balance(user_id)
-    user_balance = user_balance_data[0] if user_balance_data else 0
+    user_balance = await DB.get_user_balance(user_id)
+
+
     bot_username = (await bot.get_me()).username
     try:
         sum = int(message.text)
@@ -2904,8 +3377,9 @@ async def handle_check_amount(callback: types.CallbackQuery, bot: Bot):
     sum = int(callback.data.split('_')[1])
     bot_username = (await bot.get_me()).username
     # Проверка баланса
-    user_balance_data = await DB.get_user_balance(user_id)
-    user_balance = user_balance_data[0] if user_balance_data else 0
+    user_balance = await DB.get_user_balance(user_id)
+
+
     if sum + (sum//100) > user_balance:
         builder = InlineKeyboardBuilder()
         builder.add(types.InlineKeyboardButton(text="Пополнить баланс", callback_data='deposit_menu'))
@@ -2948,8 +3422,8 @@ async def handle_check_amount(callback: types.CallbackQuery, bot: Bot):
 @client.callback_query(F.data == 'multi_check')
 async def create_multi_check(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     user_id = callback.from_user.id
-    user_balance_data = await DB.get_user_balance(user_id)
-    user_balance = user_balance_data[0] if user_balance_data else 0
+    user_balance = await DB.get_user_balance(user_id)
+
 
     if user_balance < 1010:
         builder = InlineKeyboardBuilder()
@@ -2991,8 +3465,8 @@ async def handle_multi_check_quantity(message: types.Message, state: FSMContext)
 @client.message(checks.multi_check_amount)
 async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
-    user_balance_data = await DB.get_user_balance(user_id)
-    user_balance = user_balance_data[0] if user_balance_data else 0
+    user_balance = await DB.get_user_balance(user_id)
+
     bot_username = (await bot.get_me()).username
 
     try:
