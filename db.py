@@ -1,20 +1,27 @@
 import aiosqlite
-from datetime import datetime, timedelta
-
+from datetime import datetime
+import pytz
+MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 
 class DataBase:
     def __init__(self):
         self.con = None
 
+
     async def create(self):
+
         self.con = await aiosqlite.connect('/data/users.db')
+        if self.con is None:  # Избегайте повторной инициализации
+            self.con = await aiosqlite.connect('/data/users.db')
+        print('бд подключена')
         async with self.con.cursor() as cur:
             await cur.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     balance INTEGER DEFAULT 0,
-                    referrer_id INTEGER DEFAULT NULL
+                    referrer_id INTEGER DEFAULT NULL,
+                    rub_balance INTEGER DEFAULT 0
                 )
             ''')
             await cur.execute('''
@@ -96,7 +103,185 @@ class DataBase:
                     uid TEXT
                 )
             ''')
+            await cur.execute('''
+                CREATE TABLE IF NOT EXISTS conversions (
+                    user_id INTEGER PRIMARY KEY,
+                    last_conversion_date TEXT
+                )
+            ''')
+            await cur.execute('''
+                CREATE TABLE IF NOT EXISTS output (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    wallet TEXT,
+                    amount REAL,
+                    type INTEGER 
+                )
+            ''')
+
+            await cur.execute('''
+                CREATE TABLE IF NOT EXISTS bonus (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target_id TEXT NOT NULL,
+                    link TEXT NOT NULL
+                )
+            ''')
+            await cur.execute('''
+                CREATE TABLE IF NOT EXISTS bonus_time (
+                    user_id INTEGER PRIMARY KEY,
+                    last_bonus_date TEXT
+                )
+            ''')
+
             await self.con.commit()
+
+
+
+
+    async def get_bonus_ops(self):
+        async with self.con.cursor() as cur:
+            await cur.execute(
+                'SELECT * FROM bonus',
+            )
+            return await cur.fetchall()
+
+
+    async def get_bonus_op(self, id):
+        async with self.con.cursor() as cur:
+            await cur.execute('SELECT * FROM bonus WHERE id = ?', (id,))
+            return await cur.fetchone()
+
+
+    # Метод для добавления ОП
+    async def add_bonus_op(self, target_id, link):
+        async with self.con.cursor() as cur:
+            await cur.execute('''INSERT INTO bonus (target_id, link)
+                          VALUES (?, ?)''', (target_id, link))
+            await self.con.commit()
+
+    # Метод для удаления ОП (удаляет все ОП или только для указанного канала)
+    async def remove_bonus_op(self, id):
+        async with self.con.cursor() as cur:
+            await cur.execute('DELETE FROM bonus WHERE id = ?', (id,))
+            await self.con.commit()
+
+
+    async def get_last_bonus_date(self, user_id: int) -> str:
+        connection = await self.connect()  # Явно ожидаем результат корутины
+        async with connection.execute(
+                "SELECT last_bonus_date FROM bonus_time WHERE user_id = ?",
+                (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row["last_bonus_date"] if row else None
+
+    async def update_last_bonus_date(self, user_id: int):
+        """Обновить дату последней конвертации."""
+        async with self.con.cursor() as cur:
+            today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+            await cur.execute('''
+                INSERT INTO bonus_time (user_id, last_bonus_date)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET last_bonus_date = excluded.last_bonus_date
+            ''', (user_id, today))
+            await self.con.commit()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    # ВЫВОД
+
+    async def add_output(self, user_id, wallet, amount, type):
+        async with self.con.cursor() as cur:
+            await cur.execute('SELECT 1 FROM output WHERE user_id = ?', (user_id,))
+            if await cur.fetchone() is None:
+                await cur.execute('INSERT INTO output (user_id, wallet, amount, type) VALUES (?, ?, ?, ?)',
+                                  (user_id, wallet, amount, type))
+                await self.con.commit()
+                return True
+
+
+    async def get_outputs(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('SELECT * FROM output')
+            return await cur.fetchall()
+
+    async def get_usdt_outputs(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('SELECT * FROM output WHERE type = 1')
+            return await cur.fetchall()
+
+    async def get_rub_outputs(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('SELECT * FROM output WHERE type = 2')
+            return await cur.fetchall()
+
+    async def get_output_userid(self, user_id):
+        async with self.con.cursor() as cur:
+            await cur.execute('SELECT * FROM output WHERE user_id = ?', (user_id,))
+            return await cur.fetchone()
+
+    async def get_output(self, id):
+        async with self.con.cursor() as cur:
+            await cur.execute('SELECT * FROM output WHERE id = ?', (id,))
+            return await cur.fetchone()
+
+    async def delete_output(self, id):
+        async with self.con.cursor() as cur:
+            await cur.execute('DELETE FROM output WHERE id = ?', (id,))
+            await self.con.commit()
+            return cur.rowcount > 0
+
+
+
+    # КОНВЕРТАЦИЯ
+
+    async def connect(self):
+        connection = await aiosqlite.connect("/data/users.db")
+        connection.row_factory = aiosqlite.Row  # Добавляем row_factory для доступа по ключам
+        return connection
+
+    async def get_last_conversion_date(self, user_id: int) -> str:
+        connection = await self.connect()  # Явно ожидаем результат корутины
+        async with connection.execute(
+                "SELECT last_conversion_date FROM conversions WHERE user_id = ?",
+                (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row["last_conversion_date"] if row else None
+
+    async def update_last_conversion_date(self, user_id: int):
+        """Обновить дату последней конвертации."""
+        async with self.con.cursor() as cur:
+            today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+            await cur.execute('''
+                INSERT INTO conversions (user_id, last_conversion_date)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET last_conversion_date = excluded.last_conversion_date
+            ''', (user_id, today))
+            await self.con.commit()
+
+
+
+
+
+
+
+
 
     async def is_check_activated(self, user_id, uid):
         """Проверка, выполнено ли задание пользователем"""
@@ -133,7 +318,8 @@ class DataBase:
             ''', (uid, user_id, type, sum, amount))
             await self.con.commit()
 
-    async def update_check(self, check_id, amount=None, description=None, locked_for_user=None, password=None, OP_id=None):
+    async def update_check(self, check_id, amount=None, description=None, locked_for_user=None, password=None,
+                           OP_id=None):
         """
         Изменяет необязательные параметры чека.
 
@@ -232,9 +418,6 @@ class DataBase:
         async with self.con.cursor() as cur:
             await cur.execute('SELECT * FROM checks WHERE check_id = ?', (check_id,))
             return await cur.fetchone()
-
-
-
 
     async def clear_tasks_and_refund(self):
         task_prices = {1: 200, 2: 3000, 3: 300}
@@ -561,12 +744,16 @@ class DataBase:
             await cur.execute('SELECT * FROM op_pr WHERE task_id = ?', (task_id,))
             return await cur.fetchone()
 
+
+
+
     # БАЛАНС
 
     async def get_user_balance(self, user_id):
-        async with self.con.cursor() as cur:
-            await cur.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,))
-            return await cur.fetchone()
+        connection = await self.connect()  # Явно ожидаем результат корутины
+        async with connection.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row['balance'] if row else 0  # Возвращаем баланс или 0, если записи нет
 
     async def add_balance(self, user_id, amount):
         async with self.con.cursor() as cur:
@@ -583,6 +770,36 @@ class DataBase:
                 (balance, user_id)
             )
             await self.con.commit()
+
+
+
+    # РУБ БАЛАНС
+
+    async def get_user_rub_balance(self, user_id):
+        connection = await self.connect()  # Явно ожидаем результат корутины
+        async with connection.execute('SELECT rub_balance FROM users WHERE user_id = ?', (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row['rub_balance'] if row else 0  # Возвращаем баланс или 0, если записи нет
+
+    async def add_rub_balance(self, user_id, amount):
+        async with self.con.cursor() as cur:
+            await cur.execute(
+                'UPDATE users SET rub_balance = rub_balance + ? WHERE user_id = ?',
+                (amount, user_id)
+            )
+            await self.con.commit()
+
+    async def update_rub_balance(self, user_id, rub_balance):
+        async with self.con.cursor() as cur:
+            await cur.execute(
+                'UPDATE users SET rub_balance = ? WHERE user_id = ?',
+                (rub_balance, user_id)
+            )
+            await self.con.commit()
+
+
+
+
 
     # РЕФЕРАЛКА
     async def count_user_referrals(self, user_id):
@@ -633,6 +850,8 @@ class DataBase:
             await self.con.commit()
 
     async def select_user(self, user_id):
+        if self.con is None:  # Избегайте повторной инициализации
+            self.con = await aiosqlite.connect('/data/users.db')
         async with self.con.cursor() as cur:
             await cur.execute('''
                 SELECT * FROM users WHERE user_id = ?
@@ -643,7 +862,8 @@ class DataBase:
                     'user_id': row[0],
                     'username': row[1],
                     'balance': row[2],
-                    'referrer_id': row[3]
+                    'referrer_id': row[3],
+                    'rub_balance': row[4]
                 }
             else:
                 return None
