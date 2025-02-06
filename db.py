@@ -1,6 +1,8 @@
 import aiosqlite
 from datetime import datetime
 import pytz
+from aiocron import crontab
+import asyncio
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 
 class DataBase:
@@ -9,11 +11,12 @@ class DataBase:
 
 
     async def create(self):
-
-        self.con = await aiosqlite.connect('/data/users.db')
+        self.con = await aiosqlite.connect('users.db')
+        
         if self.con is None:  # Избегайте повторной инициализации
-            self.con = await aiosqlite.connect('/data/users.db')
+            self.con = await aiosqlite.connect('users.db')
         print('бд подключена')
+
         async with self.con.cursor() as cur:
             await cur.execute('''
                 CREATE TABLE IF NOT EXISTS users (
@@ -132,7 +135,24 @@ class DataBase:
                     last_bonus_date TEXT
                 )
             ''')
+            await cur.execute('''
+                CREATE TABLE IF NOT EXISTS all_statics (
+                    user_id INTEGER PRIMARY KEY,
+                    all_subs_chanel INTEGER DEFAULT 0,
+                    all_subs_groups INTEGER DEFAULT 0,
+                    all_taasks INTEGER DEFAULT 0,
+                    all_see INTEGER DEFAULT 0,
+                    users INTEGER DEFAULT 0
+                )
+            ''')
 
+
+            await cur.execute('''
+                INSERT OR IGNORE INTO all_statics (user_id, all_subs_chanel, all_subs_groups, all_taasks, all_see, users)
+                VALUES (1, 0, 0, 0, 0, 0), (2, 0, 0, 0, 0, 0)
+            ''')
+
+            
             await self.con.commit()
 
 
@@ -188,17 +208,120 @@ class DataBase:
 
 
 
+#ОБЩАЯ СТАТИСТИКА
+    # Функция для увеличения значения в колонке all_subs_chanel на 1
+    async def increment_all_subs_chanel(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('''
+            UPDATE all_statics
+            SET all_subs_chanel = all_subs_chanel + 1
+            WHERE user_id = 1
+            ''')
+            await self.con.commit()
+
+    # Функция для увеличения значения в колонке all_subs_group на 1
+    async def increment_all_subs_group(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('''
+            UPDATE all_statics
+            SET all_subs_groups = all_subs_groups + 1
+            WHERE user_id = 1
+            ''')
+            await self.con.commit()
+
+    # Функция для увеличения значения в колонке all_taasks на 1
+    async def increment_all_taasks(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('''
+            UPDATE all_statics
+            SET all_taasks = all_taasks + 1
+            WHERE user_id = 1
+            ''')
+            await self.con.commit()
+
+    # Функция для увеличения значения в колонке all_see на 1
+    async def increment_all_see(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('''
+            UPDATE all_statics
+            SET all_see = all_see + 1
+            WHERE user_id = 1
+            ''')
+            await self.con.commit()
+
+
+
+    async def get_statics(self):
+        # Подключение к базе данных
+        async with self.con.cursor() as cur:
+            # Выполнение запроса для получения всех данных из таблицы
+            await cur.execute('SELECT * FROM all_statics')
+            
+            # Получение всех строк
+            rows = await cur.fetchall()
+            
+            # Возврат результата
+            return rows 
+
+
+
+    #ЕЖЕДНЕВНАЯ ОБЩАЯ СТАТИСТИКА
+    async def reset_daily_statistics(self):
+        async with self.con.cursor() as cur:
+            # Обнуление статистики для user_id = 2 
+            await cur.execute('''
+            UPDATE all_statics
+            SET all_subs_chanel = 0, all_subs_groups = 0, all_taasks = 0, all_see = 0
+            WHERE user_id = 2 
+            ''')
+            await self.con.commit()
+            print(f"Статистика для user_id = 2 очищена в {datetime.now()}")
+
+
+    async def increment_statistics(self, user_id, column):
+        async with self.con.cursor() as cur:
+            # Увеличение значения в указанной колонке
+            await cur.execute(f'''
+            UPDATE all_statics
+            SET {column} = {column} + 1
+            WHERE user_id = ?
+            ''', (user_id,))
+            await self.con.commit()
 
 
 
 
+    async def all_balance(self):
+        try:
+            from config import ADMINS_ID
+            print(f"ADMINS_ID: {ADMINS_ID}")
+            async with self.con.cursor() as cur:
+                query = """
+                SELECT SUM(balance)
+                FROM users
+                WHERE user_id NOT IN (:id1, :id2, :id3, :id4);
+                """
+                params = {'id1': ADMINS_ID[0], 'id2': ADMINS_ID[1], 'id3': ADMINS_ID[2], 'id4': ADMINS_ID[3]}
+                print(f"Запрос: {query}, Параметры: {params}")
+                result = await cur.execute(query, params)
+                row = await result.fetchone()
+                print(f"Результат запроса: {row}")
+                total_balance = row[0] if row else 0
+                print(f"Общая сумма баланса: {total_balance}")
+                return total_balance 
+        except Exception as e:
+            print(f"Ошибка: {e}")
+            return 0
 
-
-
-
-
-
-
+    # Функция для увеличения значения в колонке users на 1
+    async def increment_all_users(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('''
+            UPDATE all_statics
+            SET users = users + 1
+            WHERE user_id = 2
+            ''')
+            await self.con.commit()
 
 
 
@@ -902,3 +1025,32 @@ class DataBase:
 
 
 DB = DataBase()
+
+
+@crontab('0 0 * * *', tz='Europe/Moscow')
+async def scheduled_reset():
+    await DB.reset_daily_statistics()
+
+
+async def db_main():
+    print('main1')
+    await DB.create()  # Инициализация базы данных
+    await scheduled_reset()  # Запуск планировщика
+    await asyncio.sleep(10)  # Для демонстрации
+    print('main2')
+
+import asyncio
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime, timedelta
+
+
+
+async def main():
+    scheduler = AsyncIOScheduler()
+    # Запускаем задачу впервые немедленно
+    await DB.reset_daily_statistics()
+    # Планируем последующие запуска через 24 часа
+    scheduler.add_job(DB.reset_daily_statistics(), 'interval', days=1)
+    scheduler.start()
+
+    await asyncio.sleep(3600) 

@@ -71,7 +71,7 @@ class output(StatesGroup):
 
 
 
-@client.message(F.text.startswith('/start'))
+@client.message(F.text.startswith('/start')) 
 async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
     user = await DB.select_user(message.from_user.id)
     await state.clear()
@@ -173,6 +173,7 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
                 return
 
         # Основное меню
+        await DB.increment_all_users() 
         await message.answer(
             "💎 <b>PR MIT</b> - <em>мощный и уникальный инструмент для рекламы ваших проектов</em>\n\n<b>Главное меню</b>",
             reply_markup=menu_kb())
@@ -278,6 +279,11 @@ async def stats_menu_handler(callback: types.CallbackQuery):
     user_count = len(await DB.select_all())
     all_tasks = len(await DB.get_tasks())
     calculate_total_cost = await DB.calculate_total_cost()
+    statics = await DB.get_statics()
+    print(statics)
+    id, chanels, groups, all, see, u = statics[0] 
+    id2, chanels2, groups2, all2, see2, users = statics[1] 
+    balance = await DB.all_balance()
     text = f"""
     <b>🌐 Статистика 🌐 </b>
 
@@ -285,6 +291,21 @@ async def stats_menu_handler(callback: types.CallbackQuery):
 
 💼 Всего заданий: {all_tasks}
 💸 Возможно заработать: {calculate_total_cost}
+
+🗓<b>Ежедненая статистика</b>: 
+💼Выполнено заданий всех типов: {all2}
+📣 Подписались на каналы: {chanels2}
+👥 Подписались на группы: {groups2}
+👁️ Общее количество просмотров: {see2}
+👤Новых пользователей сегодня: {users}
+
+🗓<b>Статистика за всё время работы:</b>
+💼Выполнено заданий всех типов: {all}
+📣 Подписались на каналы: {chanels}
+👥 Подписались на группы: {groups}
+👁️ Общее количество просмотров: {see}
+💸Баланс всех пользователей: {balance} MC
+
 """
 
     await callback.message.edit_text(text, reply_markup=back_menu_kb())
@@ -662,8 +683,8 @@ async def corvertation_rubtomit_handler(callback: types.CallbackQuery, state: FS
     last_conversion_date = await DB.get_last_conversion_date(user_id)
     today = datetime.datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
     if last_conversion_date == today:
-        await message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_profile_kb())
-        return
+        await callback.message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_profile_kb())
+        return 
 
     if mit_balance is None or mit_balance == 0:
         await callback.message.edit_text('😢 <b>У вас недостаточно $MICO для осуществления конвертации</b>', reply_markup=back_profile_kb())
@@ -1396,7 +1417,9 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
             await DB.delete_task(task_id)
             await bot.send_message(creator_id, f"🎉 Одно из ваших заданий было успешно выполнено",
                                    reply_markup=back_menu_kb())
-
+            
+        await DB.increment_all_subs_chanel() 
+        await DB.increment_all_taasks() 
         await callback.message.edit_text("✅")
         await callback.answer("+1500")
         await asyncio.sleep(2)
@@ -1645,6 +1668,8 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
             await bot.send_message(creator_id, f"🎉 Одно из ваших заданий было успешно выполнено",
                                    reply_markup=back_menu_kb())
 
+        await DB.increment_all_subs_group() 
+        await DB.increment_all_taasks()
         await callback.message.edit_text("✅")
         await callback.answer("+1500")
         await asyncio.sleep(2)
@@ -1836,6 +1861,8 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
                     delete_task = await DB.get_task_by_id(task_id)
                     creator_id = delete_task[1]
                     await DB.delete_task(task_id)
+                    await DB.increment_all_see()
+                    await DB.increment_all_taasks()
                     await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на пост было успешно выполнено!",
                                            reply_markup=back_menu_kb())
 
@@ -3526,7 +3553,6 @@ async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSM
 
     except ValueError:
         await message.answer("❌ <b>Пожалуйста, введите корректную сумму за одну активацию чека</b>")
-
 
 
 
