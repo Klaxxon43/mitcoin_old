@@ -20,6 +20,7 @@ import datetime
 import pytz
 from aiocryptopay import AioCryptoPay, Networks
 import requests
+import uuid
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ class output(StatesGroup):
 
 
 
-@client.message(F.text.startswith('/start')) 
+@client.message(F.text.startswith('/start'))
 async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
     user = await DB.select_user(message.from_user.id)
     await state.clear()
@@ -79,13 +80,18 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
     args = message.text.split()
     referrer_id = None
     check_uid = None
+    ref_user_id = None  # ID пользователя, который активирует чек по реферальной ссылке
 
     if len(args) > 1:
         param = args[1]
         if param.startswith("check_"):
             check_uid = param[len("check_"):]
-        else:
-            referrer_id = int(param)
+        elif param.startswith("ref_"):
+            # Обработка реферальной ссылки
+            ref_parts = param.split("_")
+            if len(ref_parts) == 3:
+                check_uid = ref_parts[1]
+                ref_user_id = int(ref_parts[2])  # ID реферера (пользователя, чья ссылка использовалась)
 
     # Обработка личных сообщений
     if message.chat.type == 'private':
@@ -106,11 +112,8 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
             if check and not await DB.is_check_activated(message.from_user.id, check_uid) and check[2] != message.from_user.id:
                 usname = message.from_user.username
                 if check[3] == 1:  # Сингл-чек
-
                     if check[7]:
-
                         if (check[7])[0] == '@':
-
                             if check[7] != f'@{usname}':
                                 await message.answer("❌ <b>Этот чек предназначен для другого пользователя</b>", reply_markup=back_menu_kb())
                                 return
@@ -121,7 +124,7 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
 
                     await DB.add_balance(message.from_user.id, check[4])
                     await DB.process_check_activation(check_uid)
-                    await DB.add_activated_check(message.from_user.id,check_uid)
+                    await DB.add_activated_check(message.from_user.id, check_uid)
                     await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
 
                     name = message.from_user.full_name
@@ -133,7 +136,6 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
                     return
 
                 elif check[3] == 2:  # Мульти-чек
-
                     if check[5] > 0:
                         if check[8]:  # Если требуется пароль
                             await message.answer("🔑 <b>Для получения чека необходимо ввести пароль:</b>", reply_markup=back_menu_kb())
@@ -148,6 +150,19 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
                                     await DB.add_balance(message.from_user.id, check[4])
                                     await DB.process_check_activation(check_uid)
                                     await DB.add_activated_check(message.from_user.id, check_uid)
+
+                                    # Если чек активирован по реферальной ссылке, начисляем награду рефереру
+                                    if ref_user_id:
+                                        referral_percentage = 10  # Например, 10%
+                                        referral_amount = (check[4] * referral_percentage) // 100
+                                        await DB.add_balance(ref_user_id, referral_amount)
+                                        await bot.send_message(ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
+
+                                    # Создаем реферальную ссылку для текущего пользователя
+                                    bot_username = (await bot.get_me()).username
+                                    referral_link = f"https://t.me/{bot_username}?start=ref_{check_uid}_{message.from_user.id}"
+                                    await message.answer(f"🔗 <b>Ваша реферальная ссылка:</b>\n\n{referral_link}")
+
                                     await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
                                     return
                                 else:
@@ -156,12 +171,25 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
 
                             except Exception as e:
                                 print(f'Ошибка при получении чека - {e}')
-                                await message.answer('😢 <b>В данный момент невозможно активировать этот чек, повторите попытку позже</b>',reply_markup=back_menu_kb())
+                                await message.answer('😢 <b>В данный момент невозможно активировать этот чек, повторите попытку позже</b>', reply_markup=back_menu_kb())
                                 return
 
                         await DB.add_balance(message.from_user.id, check[4])
                         await DB.process_check_activation(check_uid)
                         await DB.add_activated_check(message.from_user.id, check_uid)
+
+                        # Если чек активирован по реферальной ссылке, начисляем награду рефереру
+                        if ref_user_id:
+                            referral_percentage = 10  # Например, 10%
+                            referral_amount = (check[4] * referral_percentage) // 100
+                            await DB.add_balance(ref_user_id, referral_amount)
+                            await bot.send_message(ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
+
+                        # Создаем реферальную ссылку для текущего пользователя
+                        bot_username = (await bot.get_me()).username
+                        referral_link = f"https://t.me/{bot_username}?start=ref_{check_uid}_{message.from_user.id}"
+                        await message.answer(f"🔗 <b>Ваша реферальная ссылка:</b>\n\n{referral_link}")
+
                         await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
                         return
 
@@ -173,7 +201,7 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
                 return
 
         # Основное меню
-        await DB.increment_all_users() 
+        await DB.increment_all_users()
         await message.answer(
             "💎 <b>PR MIT</b> - <em>мощный и уникальный инструмент для рекламы ваших проектов</em>\n\n<b>Главное меню</b>",
             reply_markup=menu_kb())
@@ -1307,8 +1335,9 @@ async def generate_tasks_keyboard_chanel(tasks, chanelpage, total_pages, bot):
         chat_id = task[2]
         chat_title = task[5]
 
-
-        button_text = f"{chat_title} | +1500"
+        from aiogram.types import Chat
+        chat: Chat  = await bot.get_chat(chat_id)
+        button_text = f"{chat.title} | +1500"
         builder.row(types.InlineKeyboardButton(text=button_text, callback_data=f"chaneltask_{task[0]}"))
 
     # Кнопка "Назад"
@@ -1381,7 +1410,6 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     target_id = task[2]
     invite_link = await check_admin_and_get_invite_link_chanel(bot, task[2])
-
     # Проверяем, подписан ли пользователь на канал
     try:
         bot_member = await bot.get_chat_member(target_id, callback.message.chat.id)
@@ -1893,7 +1921,7 @@ async def generate_tasks_keyboard(tasks, page, total_pages):
     # Выводим задания на текущей странице (по 5 на страницу)
     for task in tasks:
         task_type = TASK_TYPES.get(task[4], 'Неизвестно')
-        amount = task[3]
+        amount = task[3]  
         button_text = f"{task_type} | {amount}"
         # Каждая кнопка в новой строке
         builder.row(types.InlineKeyboardButton(text=button_text, callback_data=f"task_{task[0]}"))
@@ -1913,6 +1941,45 @@ async def generate_tasks_keyboard(tasks, page, total_pages):
 
     return builder.as_markup()
 
+async def generate_tasks_keyboard2(tasks, page, total_pages, bot):
+    builder = InlineKeyboardBuilder()
+
+    # Выводим задания на текущей странице (по 5 на страницу)
+    for task in tasks:
+        # Распаковываем данные задачи
+        task_id, user_id, chat_id, amount, task_type_id, _ = task  # Шестой элемент игнорируем
+
+        # Получаем тип задачи
+        task_type = TASK_TYPES.get(task_type_id, 'Неизвестно')
+
+        # Получаем информацию о канале/чате для каждой задачи
+        try:
+            chat = await bot.get_chat(chat_id)  # Получаем информацию о канале/чате
+            chat_name = chat.title  # Извлекаем название канала/чата
+        except Exception as e:
+            print(f"Ошибка при получении информации о канале: {e}")
+            chat_name = "Неизвестный канал"  # Используем заглушку в случае ошибки
+
+        # Формируем текст кнопки
+        button_text = f"{task_type} | {chat_name} | {amount}"
+        
+        # Каждая кнопка в новой строке
+        builder.row(types.InlineKeyboardButton(text=button_text, callback_data=f"task_{task_id}"))
+
+    # Кнопка "Назад"
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="profile"))
+
+    # Кнопки пагинации
+    pagination = []
+    if page > 1:
+        pagination.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"page_{page - 1}"))
+    pagination.append(types.InlineKeyboardButton(text=str(page), callback_data="current_page"))
+    if page < total_pages:
+        pagination.append(types.InlineKeyboardButton(text="➡️", callback_data=f"page_{page + 1}"))
+
+    builder.row(*pagination)  # Кнопки пагинации в одну строку
+
+    return builder.as_markup()
 
 # Метод для получения страницы с заданиями (пагинация)
 def paginate_tasks(tasks, page=1, per_page=5):
@@ -1924,32 +1991,39 @@ def paginate_tasks(tasks, page=1, per_page=5):
 
 
 @client.callback_query(F.data == 'my_works')
-async def taskss_handler(callback: types.CallbackQuery):
+async def taskss_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-    tasks = await DB.get_tasks_by_user(user_id)
-    print(tasks)
+    tasks = await DB.get_tasks_by_user(user_id)  # Получаем задачи пользователя
+    print(tasks)  # Проверяем данные
+
     # Начинаем с первой страницы
     page = 1
     tasks_on_page, total_pages = paginate_tasks(tasks, page)
 
     # Генерируем инлайн кнопки
-    keyboard = await generate_tasks_keyboard(tasks_on_page, page, total_pages)
+    keyboard = await generate_tasks_keyboard2(tasks_on_page, page, total_pages, bot)
 
     await callback.message.edit_text("💼 <b>Ваши задания:</b>", reply_markup=keyboard)
 
 
 @client.callback_query(lambda c: c.data.startswith("page_"))
-async def change_page_handler(callback: types.CallbackQuery):
+async def change_page_handler(callback: types.CallbackQuery, bot: Bot):
+    # Получаем номер страницы из callback_data
     page = int(callback.data.split('_')[1])
+    
+    # Получаем ID пользователя
     user_id = callback.from_user.id
+    
+    # Получаем задачи пользователя
     tasks = await DB.get_tasks_by_user(user_id)
-
+    
     # Получаем задания на нужной странице
     tasks_on_page, total_pages = paginate_tasks(tasks, page)
 
     # Генерируем инлайн кнопки
-    keyboard = await generate_tasks_keyboard(tasks_on_page, page, total_pages)
+    keyboard = await generate_tasks_keyboard2(tasks_on_page, page, total_pages, bot)
 
+    # Обновляем сообщение с новыми кнопками
     await callback.message.edit_text("💼 <b>Ваши задания:</b>", reply_markup=keyboard)
 
 
@@ -1984,6 +2058,7 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
     # Определяем тип задачи
     task_type = TASK_TYPES.get(task[4], 'Неизвестно')
     amount = task[3]
+    max_amount = task[5]
     if amount is None:
         amount = 1
     # Вычисляем стоимость задания
@@ -2003,8 +2078,8 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
         task_info = f"""
 <b>{task_type}</b>: 
 {chat_title}
-
-🧮 Количество: {amount}
+🔋Активаций: {max_amount}
+🧮 Активаций осталось: {amount}
 💰 Стоимость: {cost} MITcoin 
 
 {invite_link}    
@@ -2012,6 +2087,8 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
         builder = InlineKeyboardBuilder()
         builder.add(types.InlineKeyboardButton(text="🔙 Назад", callback_data="my_works"))
         builder.add(types.InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"delete_{task_id}"))
+        builder.add(types.InlineKeyboardButton(text="✏️Изменить количество выполнений", callback_data=f"edit_{task_id}"))
+        builder.adjust(2, 1)
         await callback.message.edit_text(task_info, reply_markup=builder.as_markup())
 
     if task[4] in [3]:
@@ -2028,16 +2105,17 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
             """
         await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
         builder = InlineKeyboardBuilder()
-        builder.add(types.InlineKeyboardButton(text="🔙 Назад", callback_data="my_works"))
-        builder.add(types.InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"delete_{task_id}"))
-        await callback.message.answer(task_info, reply_markup=builder.as_markup())
+        builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="my_works"), types.InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"delete_{task_id}"))
+        # builder.add(types.InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"delete_{task_id}"))
+        builder.row(types.InlineKeyboardButton(text="✏️Изменить количество выполнений", callback_data=f"edit_{task_id}"))
+        await callback.message.edit_text(task_info, reply_markup=builder.as_markup())
 
 
 @client.callback_query(lambda c: c.data.startswith("delete_"))
 async def delete_task_handler(callback: types.CallbackQuery):
     task_id = int(callback.data.split('_')[1])
     task = await DB.get_task_by_id(task_id)
-    amount = task[3]
+    amount = task[3] 
     if amount is None:
         amount = 1
     price_per_unit = {1: 1500, 2: 1500, 3: 300}
@@ -2060,6 +2138,68 @@ async def delete_task_handler(callback: types.CallbackQuery):
     keyboard = await generate_tasks_keyboard(tasks_on_page, page, total_pages)
 
     await callback.message.edit_text("💼 <b>Ваши задания:</b>", reply_markup=keyboard)
+
+class EditTaskState(StatesGroup):
+    waiting_for_amount = State()  # Состояние ожидания ввода нового количества
+
+@client.callback_query(lambda c: c.data.startswith("edit_"))
+async def edit_task_handler(callback: types.CallbackQuery, state: FSMContext):
+    # Получаем ID задания из callback-запроса
+    task_id = int(callback.data.split('_')[1])
+    
+    # Получаем задачу из базы данных
+    task = await DB.get_task_by_id(task_id)
+    if not task:
+        await callback.message.edit_text("Задание не найдено!")
+        return
+
+    # Сохраняем ID задания в состоянии FSM
+    await state.update_data(task_id=task_id)
+
+    # Запрашиваем у пользователя новое количество выполнений
+    await callback.message.edit_text("✏️ Введите новое количество выполнений для задания:")
+    
+    # Переводим бота в состояние ожидания ввода нового количества
+    await state.set_state(EditTaskState.waiting_for_amount)
+
+@client.message(EditTaskState.waiting_for_amount)
+async def process_amount_input(message: types.Message, state: FSMContext):
+    try:
+        new_amount = int(message.text)
+        if new_amount <= 0:
+            await message.answer("❌ Количество выполнений должно быть больше 0.")
+            return
+
+        balance = await DB.get_user_balance(message.from_user.id)
+
+        if new_amount > balance // 1500:
+            await message.reply(f"""
+❌ <b>У вас недостаточно средств для создания задания.</b>
+Ваш баланс: {balance}
+Требуется: {new_amount * 1500}
+Не хватает: { (new_amount * 1500) - balance}""", reply_markup=types.ReplyKeyboardRemove()) # Удаляем клавиатуру
+            return
+
+        data = await state.get_data()
+        task_id = data.get("task_id")
+        await DB.update_task_amount2(task_id, new_amount)
+
+        user_id = message.from_user.id
+        tasks = await DB.get_tasks_by_user(user_id)
+        page = 1
+        tasks_on_page, total_pages = paginate_tasks(tasks, page)
+        keyboard = await generate_tasks_keyboard(tasks_on_page, page, total_pages)
+
+        # Вместо message.answer используем message.edit_text
+        await message.reply("✅ Количество выполнений успешно обновлено!\n💼 <b>Ваши задания:</b>", reply_markup=keyboard)
+
+
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректное число.")
+        await state.clear()
+    except Exception as e:
+        await message.reply(f"Произошла ошибка: {e}") #Обработка других ошибок
+
 
 
 @client.callback_query(F.data == 'chanel_pr_button')
@@ -2129,7 +2269,7 @@ async def pr_chanel3(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
     invite_link = f"http://t.me/{bot_username}?startchannel&admin=invite_users+manage_chat"
     add_button = InlineKeyboardButton(text="➕ Добавить бота в канал", url=invite_link)
     add_button1 = InlineKeyboardButton(text="❌ Отмена", callback_data='pr_menu_cancel')
-    # Создаем клавиатуру и добавляем в нее кнопку
+    # Создаем клавиатуру и добавляем в нее кнопку 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button], [add_button1]])
     await callback.message.edit_text(f'''
 👾 Теперь необходимо добавить бота в ваш канал и предоставить ему права администратора, для этого...
@@ -2314,6 +2454,7 @@ async def pr_chat4(message: types.Message, state: FSMContext, bot: Bot):
 
         builder = InlineKeyboardBuilder()
         builder.add(types.InlineKeyboardButton(text="🔙 Вернуться в меню", callback_data="back_menu"))
+        
         await message.answer(
             "🥳 Задание создано! Оно будет размещено в разделе <b>Заработать</b>\n\nКогда задание будет выполнено - Вы получите уведомление 😉",
             reply_markup=builder.as_markup())
@@ -2903,14 +3044,15 @@ async def check_detail_handler(callback: types.CallbackQuery, bot: Bot):
     # Определяем тип задачи
     check_type = CHECKS_TYPES.get(check[3], 'Неизвестно')
     amount = check[5]
+    amount_max = check[6]
     sum = check[4]
     check_link = f'https://t.me/{bot_username}?start=check_{check[1]}'
 
-    discription = check[6]
-    pin_the_user = check[7]
-
-    password = check[8]
-    OP_check = check[9]
+    discription = check[7]
+    pin_the_user = check[8]
+    
+    password = check[9]
+    OP_check = check[10]
 
     if discription is None:
         discription = " "
@@ -2936,7 +3078,8 @@ async def check_detail_handler(callback: types.CallbackQuery, bot: Bot):
         check_info = f"""
 💸 <b>Многоразовый чек на сумму {sum*amount} MIT Coin</b>
 
-<b>Количество активаций: {amount} Mit Coin</b>
+<b>Общее количество активаций: {amount_max} </b>
+<b>Количество оставшихся активаций: {amount} </b>
 <b>Сумма одной активации: {sum} Mit Coin</b>
  
 📝 <b>Описание:</b> {discription}
@@ -3493,7 +3636,6 @@ async def handle_multi_check_quantity(message: types.Message, state: FSMContext)
 async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     user_balance = await DB.get_user_balance(user_id)
-
     bot_username = (await bot.get_me()).username
 
     try:
@@ -3521,7 +3663,7 @@ async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSM
         # Списание с баланса
         await DB.update_balance(user_id, balance=user_balance - (total_amount + total_amount//100))
 
-        # Генерация уникальных чеков
+        # Генерация уникального чека
         uid = str(uuid.uuid4())
         await DB.create_check(uid=uid, user_id=user_id, type=2, sum=amount_per_check, amount=quantity)
 
@@ -3533,7 +3675,6 @@ async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSM
         add_button2 = InlineKeyboardButton(text="⚙ Настройка", callback_data=f'check_{check_id}')
         add_button3 = InlineKeyboardButton(text="🔙 Назад", callback_data='checks_menu')
 
-        # Создаем клавиатуру и добавляем в нее кнопки
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button2], [add_button3]])
         await message.answer(f'''
 💸 <b>Ваш мульти-чек создан:</b>
@@ -3553,7 +3694,3 @@ async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSM
 
     except ValueError:
         await message.answer("❌ <b>Пожалуйста, введите корректную сумму за одну активацию чека</b>")
-
-
-
-

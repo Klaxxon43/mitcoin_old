@@ -8,6 +8,7 @@ MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 class DataBase:
     def __init__(self):
         self.con = None
+        # self.pool = pool 
 
 
     async def create(self):
@@ -33,7 +34,8 @@ class DataBase:
                     user_id INTEGER,
                     target_id INTEGER,
                     amount INTEGER,
-                    type INTEGER
+                    type INTEGER,
+                    max_amount INTEGER
                 )
             ''')
             await cur.execute('''
@@ -94,6 +96,7 @@ class DataBase:
                     type INTEGER,
                     sum INTEGER NOT NULL,
                     amount INTEGER NOT NULL,
+                    max_amount INTEGER NOT NULL,
                     description TEXT,
                     locked_for_user INTEGER,
                     password TEXT,
@@ -152,6 +155,16 @@ class DataBase:
                 VALUES (1, 0, 0, 0, 0, 0), (2, 0, 0, 0, 0, 0)
             ''')
 
+            await cur.execute("""CREATE TABLE IF NOT EXISTS check_referrals (
+                id SERIAL PRIMARY KEY,  
+                check_id INT NOT NULL, 
+                referrer_id BIGINT NOT NULL,  
+                referral_link TEXT NOT NULL, 
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
+            )
+        """)
+
+            
             
             await self.con.commit()
 
@@ -374,7 +387,7 @@ class DataBase:
     # КОНВЕРТАЦИЯ
 
     async def connect(self):
-        connection = await aiosqlite.connect("/data/users.db")
+        connection = await aiosqlite.connect("users.db")
         connection.row_factory = aiosqlite.Row  # Добавляем row_factory для доступа по ключам
         return connection
 
@@ -436,9 +449,9 @@ class DataBase:
         """
         async with self.con.cursor() as cur:
             await cur.execute('''
-                INSERT INTO checks (uid, user_id, type, sum, amount)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (uid, user_id, type, sum, amount))
+                INSERT INTO checks (uid, user_id, type, sum, amount, max_amount)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (uid, user_id, type, sum, amount, amount))
             await self.con.commit()
 
     async def update_check(self, check_id, amount=None, description=None, locked_for_user=None, password=None,
@@ -640,9 +653,9 @@ class DataBase:
 
             # Вставляем новую задачу с инкрементированным task_id
             await cur.execute('''
-                INSERT INTO tasks (task_id, user_id, target_id, amount, type)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (new_task_id, user_id, target_id, amount, task_type))
+                INSERT INTO tasks (task_id, user_id, target_id, amount, type, max_amount)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (new_task_id, user_id, target_id, amount, task_type, amount,))
 
             # Сохраняем изменения в базе данных
             await self.con.commit()
@@ -664,6 +677,12 @@ class DataBase:
         async with self.con.cursor() as cur:
             await cur.execute('SELECT task_id, type FROM tasks WHERE user_id = ?', (user_id,))
             return await cur.fetchall()
+
+    async def get_target_id_by_user_admin(self, user_id):
+        """Метод для получения всех задач из базы данных для конкретного user_id"""
+        async with self.con.cursor() as cur:
+            await cur.execute('SELECT target_id, type FROM tasks WHERE user_id = ?', (user_id,))
+            return await cur.fetchall() 
 
     async def get_task_by_id(self, task_id):
         """Метод для получения задания по его порядковому номеру (task_id)"""
@@ -730,6 +749,12 @@ class DataBase:
         """Обновление количества (amount) в задании"""
         async with self.con.cursor() as cur:
             await cur.execute('UPDATE tasks SET amount = amount - 1 WHERE task_id = ?', (task_id,))
+            await self.con.commit()
+
+    async def update_task_amount2(self, task_id, amount):
+        """Обновление количества (amount) в задании"""
+        async with self.con.cursor() as cur:
+            await cur.execute('UPDATE tasks SET amount = ? WHERE task_id = ?', (amount, task_id,))
             await self.con.commit()
 
     async def calculate_total_cost(self):
@@ -1022,6 +1047,27 @@ class DataBase:
         async with self.con.cursor() as cur:
             await cur.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
             await self.con.commit()
+
+    async def create_referral_link(self, check_id: int, referrer_id: int, referral_link: str):
+        """
+        Создает запись о реферальной ссылке в базе данных.
+
+        :param check_id: ID чека
+        :param referrer_id: ID пользователя, который создал чек
+        :param referral_link: Уникальная реферальная ссылка
+        """
+        async with self.con.cursor() as cur:
+            query = await cur.execute("""
+            INSERT INTO check_referrals (check_id, referrer_id, referral_link)
+            VALUES (?, ?, ?)
+            """, (check_id, referrer_id, referral_link))
+            await self.con.commit()
+
+import aiosqlite
+
+
+
+
 
 
 DB = DataBase()
