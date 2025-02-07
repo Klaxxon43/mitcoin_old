@@ -100,9 +100,11 @@ class DataBase:
                     description TEXT,
                     locked_for_user INTEGER,
                     password TEXT,
-                    OP_id TEXT
+                    OP_id TEXT,
+                    ref_bonus INTEGER
                 )
             ''')
+
             await cur.execute('''
                 CREATE TABLE IF NOT EXISTS activated_checks (
                     user_id INTEGER,
@@ -336,6 +338,14 @@ class DataBase:
             ''')
             await self.con.commit()
 
+    async def check_fund_minus(self, id):
+        async with self.con.cursor() as cur:
+            await cur.execute('''
+            UPDATE checks
+            SET ref_fund = ref_fund - 1
+            WHERE check_id = ?
+            ''', (id, ))
+            await self.con.commit()
 
 
 
@@ -437,7 +447,7 @@ class DataBase:
             )
             await self.con.commit()
 
-    async def create_check(self, uid, user_id, type, sum, amount):
+    async def create_check(self, uid, user_id, type, sum, amount, ref_bonus, ref_fund):
         """
         Создает новый чек с обязательными параметрами.
 
@@ -449,9 +459,9 @@ class DataBase:
         """
         async with self.con.cursor() as cur:
             await cur.execute('''
-                INSERT INTO checks (uid, user_id, type, sum, amount, max_amount)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (uid, user_id, type, sum, amount, amount))
+                INSERT INTO checks (uid, user_id, type, sum, amount, max_amount, ref_bonus, ref_fund)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (uid, user_id, type, sum, amount, amount, ref_bonus, ref_fund, ))
             await self.con.commit()
 
     async def update_check(self, check_id, amount=None, description=None, locked_for_user=None, password=None,
@@ -496,6 +506,26 @@ class DataBase:
                 await cur.execute(query, params)
 
             await self.con.commit()
+
+    async def update_check2(self, check_id, ref_fund=None, **kwargs):
+        """
+        Обновляет параметры чека, включая реферальный фонд.
+        """
+        updates = []
+        params = []
+        if ref_fund is not None:
+            updates.append("ref_fund = ?")
+            params.append(ref_fund)
+        if kwargs:
+            for key, value in kwargs.items():
+                updates.append(f"{key} = ?")
+                params.append(value)
+        if updates:
+            query = f"UPDATE checks SET {', '.join(updates)} WHERE check_id = ?"
+            params.append(check_id)
+            async with self.con.cursor() as cur:
+                await cur.execute(query, params)
+                await self.con.commit()
 
     async def process_check_activation(self, uid):
         """
@@ -545,6 +575,19 @@ class DataBase:
             except:
                 return None
 
+    async def get_referral_percent(self, check_uid):
+        """
+        Получает процент реферала для чека.
+
+        :param check_uid: Уникальный идентификатор чека.
+        :return: Процент реферала.
+        """
+        async with self.con.cursor() as cur:
+            await cur.execute("SELECT referral_percent FROM checks WHERE uid = ?", (check_uid,))
+            result = await cur.fetchone()
+            return result[0] if result else 0
+
+    
     async def get_check_by_user_id(self, user_id):
         async with self.con.cursor() as cur:
             await cur.execute('SELECT * FROM checks WHERE user_id = ?', (user_id,))
@@ -1071,32 +1114,3 @@ import aiosqlite
 
 
 DB = DataBase()
-
-
-@crontab('0 0 * * *', tz='Europe/Moscow')
-async def scheduled_reset():
-    await DB.reset_daily_statistics()
-
-
-async def db_main():
-    print('main1')
-    await DB.create()  # Инициализация базы данных
-    await scheduled_reset()  # Запуск планировщика
-    await asyncio.sleep(10)  # Для демонстрации
-    print('main2')
-
-import asyncio
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from datetime import datetime, timedelta
-
-
-
-async def main():
-    scheduler = AsyncIOScheduler()
-    # Запускаем задачу впервые немедленно
-    await DB.reset_daily_statistics()
-    # Планируем последующие запуска через 24 часа
-    scheduler.add_job(DB.reset_daily_statistics(), 'interval', days=1)
-    scheduler.start()
-
-    await asyncio.sleep(3600) 

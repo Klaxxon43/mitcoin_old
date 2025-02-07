@@ -60,6 +60,10 @@ class checks(StatesGroup):
     check_discription = State()
     check_lock_user = State()
     check_password1 = State()
+    ref_fund_quantity = State()
+    refill_ref_fund_quantity = State()
+    set_ref_fund = State()
+    refill_ref_fund = State()
 
 class convertation(StatesGroup):
     mittorub = State()
@@ -87,28 +91,91 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
         if param.startswith("check_"):
             check_uid = param[len("check_"):]
         elif param.startswith("ref_"):
-            # Обработка реферальной ссылки
+            # Обработка реферальной ссылки для чеков
             ref_parts = param.split("_")
             if len(ref_parts) == 3:
                 check_uid = ref_parts[1]
                 ref_user_id = int(ref_parts[2])  # ID реферера (пользователя, чья ссылка использовалась)
+        else:
+            # Обработка обычной реферальной ссылки
+            referrer_id = int(param)
 
     # Обработка личных сообщений
     if message.chat.type == 'private':
         if not user:
             await DB.add_user(message.from_user.id, message.from_user.username)
             if referrer_id:
+                # Обычная реферальная система
                 await DB.update_user(message.from_user.id, referrer_id=referrer_id)
                 await DB.add_balance(referrer_id, 1000)
                 await DB.record_referral_earnings(referrer_id=referrer_id, referred_user_id=message.from_user.id,
                                                   amount=1000)
                 await bot.send_message(referrer_id,
-                                       f"👤 Пользователь c ID {message.from_user.id} перешел по вашей реферальной ссылке",
+                                       f"👤 Пользователь c ID {message.from_user.id} перешел по вашей реферальной ссылке\n\n💸 Вам начислено 1000 MitCoin за привлечение нового пользователя.",
                                        reply_markup=back_menu_kb())
+            elif ref_user_id:
+                # Реферальная система для чеков
+                await DB.update_user(message.from_user.id, referrer_id=ref_user_id)
+                await DB.add_balance(ref_user_id, 1000)
+                await DB.record_referral_earnings(referrer_id=ref_user_id, referred_user_id=message.from_user.id,
+                                                  amount=1000)
+                await bot.send_message(ref_user_id,
+                                       f"👤 Пользователь c ID {message.from_user.id} перешел по вашей реферальной ссылке\n\n💸 Вам начислено 1000 MitCoin за привлечение нового пользователя.",
+                                       reply_markup=back_menu_kb())
+
+        elif ref_user_id:
+            # Если пользователь уже зарегистрирован, но перешел по реферальной ссылке для чеков
+            check = await DB.get_check_by_uid(check_uid)
+            if check:
+                # Проверяем, есть ли еще активации в реферальном фонде
+                if check[12] > 0:  # ref_fund
+                    await DB.add_balance(message.from_user.id, check[4])
+                    await DB.process_check_activation(check_uid)
+                    await DB.add_activated_check(message.from_user.id, check_uid)
+
+                    # Уменьшаем количество активаций в реферальном фонде
+                    await DB.check_fund_minus(check[0])
+
+                    # Начисляем реферальный бонус
+                    referral_bonus = check[11]  # Получаем процент реферала из столбца ref_bonus
+                    referral_amount = (check[4] * referral_bonus) // 100
+                    await DB.add_balance(ref_user_id, referral_amount)
+
+                    # Сообщение активатору чека
+                    bot_username = (await bot.get_me()).username
+                    referral_link = f"https://t.me/{bot_username}?start=ref_{check_uid}_{message.from_user.id}"
+                    await message.answer(
+                        f"🥳 <b>Вы успешно активировали реферальный чек на {check[4]} MitCoin!</b>\n\n"
+                        f"🔗 <b>Ваша реферальная ссылка:</b>\n{referral_link}\n\n"
+                        f"💸 <b>Распространяйте эту ссылку и получайте {referral_bonus}% от суммы чека за каждого привлеченного пользователя!</b>",
+                        reply_markup=back_menu_kb()
+                    )
+
+                    # Сообщение рефереру
+                    await bot.send_message(
+                        ref_user_id,
+                        f"💸 <b>Пользователь c ID {message.from_user.id} активировал ваш реферальный чек!</b>\n\n"
+                        f"💰 <b>Вам начислено {referral_amount} MitCoin за активацию чека.</b>",
+                        reply_markup=back_menu_kb()
+                    )
+
+                    # Если реферальный фонд закончился, уведомляем создателя чека
+                    if check[12] - 1 == 0:
+                        await bot.send_message(
+                            check[2],
+                            f"⚠️ <b>Реферальный фонд для чека {check_uid} закончился.</b>\n\n"
+                            f"💵 Вы можете пополнить реферальный фонд, чтобы продолжить привлекать пользователей.",
+                            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                                InlineKeyboardButton(text="Пополнить реферальный фонд", callback_data=f'refill_ref_fund_{check[0]}')
+                            ]])
+                        )
+                else:
+                    await message.answer("❌ Реферальный фонд для этого чека закончился.", reply_markup=back_menu_kb())
 
         elif check_uid:
             # Активация чека
             check = await DB.get_check_by_uid(check_uid)
+            referral_bonus = str(check[11])  # Получаем процент реферала из столбца ref_bonus
             if check and not await DB.is_check_activated(message.from_user.id, check_uid) and check[2] != message.from_user.id:
                 usname = message.from_user.username
                 if check[3] == 1:  # Сингл-чек
@@ -153,15 +220,22 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
 
                                     # Если чек активирован по реферальной ссылке, начисляем награду рефереру
                                     if ref_user_id:
-                                        referral_percentage = 10  # Например, 10%
-                                        referral_amount = (check[4] * referral_percentage) // 100
+                                        referral_bonus = check[11]  # Получаем процент реферала из столбца ref_bonus
+                                        referral_amount = (check[4] * referral_bonus) // 100
                                         await DB.add_balance(ref_user_id, referral_amount)
                                         await bot.send_message(ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
+
+                                    # Отправляем уведомление создателю чека
+                                    await bot.send_message(check[2], f"💸 Ваш чек на {check[4]} MitCoin был активирован пользователем {usname}.")
 
                                     # Создаем реферальную ссылку для текущего пользователя
                                     bot_username = (await bot.get_me()).username
                                     referral_link = f"https://t.me/{bot_username}?start=ref_{check_uid}_{message.from_user.id}"
-                                    await message.answer(f"🔗 <b>Ваша реферальная ссылка:</b>\n\n{referral_link}")
+                                    await message.answer(
+                                        f"🔗 <b>Ваша реферальная ссылка:</b>\n{referral_link}\n\n"
+                                        f"💸 <b>Распространяйте эту ссылку и получайте {referral_bonus}% от суммы чека за каждого привлеченного пользователя!</b>",
+                                        reply_markup=back_menu_kb()
+                                    )
 
                                     await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
                                     return
@@ -180,15 +254,22 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
 
                         # Если чек активирован по реферальной ссылке, начисляем награду рефереру
                         if ref_user_id:
-                            referral_percentage = 10  # Например, 10%
-                            referral_amount = (check[4] * referral_percentage) // 100
+                            print(referral_bonus)
+                            referral_amount = (check[4] * int(referral_bonus)) // 100
                             await DB.add_balance(ref_user_id, referral_amount)
                             await bot.send_message(ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
+
+                        # Отправляем уведомление создателю чека
+                        await bot.send_message(check[2], f"💸 Ваш чек на {check[4]} MitCoin был активирован пользователем {usname}.")
 
                         # Создаем реферальную ссылку для текущего пользователя
                         bot_username = (await bot.get_me()).username
                         referral_link = f"https://t.me/{bot_username}?start=ref_{check_uid}_{message.from_user.id}"
-                        await message.answer(f"🔗 <b>Ваша реферальная ссылка:</b>\n\n{referral_link}")
+                        await message.answer(
+                            f"🔗 <b>Ваша реферальная ссылка:</b>\n{referral_link}\n\n"
+                            f"💸 <b>Распространяйте эту ссылку и получайте {str(referral_bonus)}% от суммы чека за каждого привлеченного пользователя!</b>",
+                            reply_markup=back_menu_kb()
+                        )
 
                         await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
                         return
@@ -209,7 +290,6 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
     # Обработка сообщений в группах и супер-группах
     elif message.chat.type in ['group', 'supergroup'] and not check_uid:
         await message.answer("Для получения информации используйте бота в личных сообщениях.")
-
 
 @client.message(checks.check_password1)
 async def handle_check_password(message: types.Message, state: FSMContext):
@@ -250,6 +330,7 @@ async def handle_check_password(message: types.Message, state: FSMContext):
 async def profile_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     user = await DB.select_user(user_id)
+    print(user)
     balance = user['balance']
     rub_balance = user['rub_balance']
     if balance is None:
@@ -3566,7 +3647,8 @@ async def handle_check_amount(callback: types.CallbackQuery, bot: Bot):
     # Генерация уникального чека
     uid = str(uuid.uuid4())
     await DB.update_balance(user_id, balance=user_balance - (sum + (sum // 100)))
-    await DB.create_check(uid=uid, user_id=user_id, type=1, sum=sum, amount=1)
+    await DB.create_check(uid=uid, user_id=user_id, type=1, sum=sum, amount=1, ref_bonus=0, ref_fund=0) 
+
     check = await DB.get_check_by_uid(uid)
     check_id = check[0]
     check_link = f"https://t.me/{bot_username}?start=check_{uid}"
@@ -3586,14 +3668,10 @@ async def handle_check_amount(callback: types.CallbackQuery, bot: Bot):
 
 
 
-
-
-
 @client.callback_query(F.data == 'multi_check')
-async def create_multi_check(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
+async def create_multi_check(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     user_balance = await DB.get_user_balance(user_id)
-
 
     if user_balance < 1010:
         builder = InlineKeyboardBuilder()
@@ -3610,7 +3688,6 @@ async def create_multi_check(callback: types.CallbackQuery, bot: Bot, state: FSM
     )
     await state.set_state(checks.multi_check_quantity)
     await state.update_data(balance=user_balance)
-
 
 @client.message(checks.multi_check_quantity)
 async def handle_multi_check_quantity(message: types.Message, state: FSMContext):
@@ -3631,20 +3708,17 @@ async def handle_multi_check_quantity(message: types.Message, state: FSMContext)
     except ValueError:
         await message.answer("❌ Пожалуйста, введите корректное количество активаций", reply_markup=cancel_all_kb())
 
-
 @client.message(checks.multi_check_amount)
 async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     user_balance = await DB.get_user_balance(user_id)
-    bot_username = (await bot.get_me()).username
 
     try:
         data = await state.get_data()
         quantity = data.get('quantity')
 
         amount_per_check = int(message.text)
-        total_amo = (quantity * amount_per_check) // 100
-        total_amount = quantity * amount_per_check + total_amo
+        total_amount = quantity * amount_per_check
 
         if amount_per_check < 1000:
             await message.answer("❌ Сумма одного чека должна быть 1000 MitCoin или больше. Попробуйте ещё раз.", reply_markup=cancel_all_kb())
@@ -3655,20 +3729,78 @@ async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSM
             builder.add(types.InlineKeyboardButton(text="Пополнить баланс", callback_data='deposit_menu'))
             builder.add(types.InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu'))
             await message.answer(
-                f"❌ <b>У вас недостаточно средств для создания чека на {quantity} активаций и суммы в {amount_per_check} MitCoin за одну активацию</b>\n\nВаш баланс - {user_balance}\nОбщая сумма чека - {total_amount} (комиссия 1% - {total_amo} MitCoin)",
+                f"❌ <b>У вас недостаточно средств для создания чека на {quantity} активаций и суммы в {amount_per_check} MitCoin за одну активацию</b>\n\nВаш баланс - {user_balance}\nОбщая сумма чека - {total_amount} ",
                 reply_markup=builder.as_markup()
             )
             return
 
+        # Сохраняем данные о чеке в состоянии
+        await state.update_data(amount_per_check=amount_per_check, total_amount=total_amount)
+
+        # Спрашиваем, хочет ли пользователь включить реферальную систему
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text="Да", callback_data='enable_referral'))
+        builder.add(types.InlineKeyboardButton(text="Нет", callback_data='disable_referral'))
+        await message.answer("🔗 <b>Хотите включить реферальную систему для этого чека?</b>", reply_markup=builder.as_markup())
+
+    except ValueError:
+        await message.answer("❌ <b>Пожалуйста, введите корректную сумму за одну активацию чека</b>")
+
+@client.callback_query(F.data == 'enable_referral')
+async def enable_referral(callback: types.CallbackQuery, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="25%", callback_data='referral_percent_25'))
+    builder.add(types.InlineKeyboardButton(text="50%", callback_data='referral_percent_50'))
+    builder.add(types.InlineKeyboardButton(text="75%", callback_data='referral_percent_75'))
+    builder.add(types.InlineKeyboardButton(text="100%", callback_data='referral_percent_100'))
+    await callback.message.edit_text("📊 <b>Выберите процент, который будут получать рефералы:</b>", reply_markup=builder.as_markup())
+
+@client.callback_query(F.data.startswith('referral_percent_'))
+async def set_referral_percent(callback: types.CallbackQuery, state: FSMContext):
+    percent = int(callback.data.split('_')[-1])
+    await state.update_data(referral_percent=percent)
+
+    await callback.message.answer(
+        "📊 <b>Введите количество доступных активаций по реферальным ссылкам:</b>",
+        reply_markup=cancel_all_kb()
+    )
+    await state.set_state(checks.set_ref_fund)
+
+@client.message(checks.set_ref_fund)
+async def handle_set_ref_fund(message: types.Message, state: FSMContext, bot: Bot):
+    try:
+        ref_fund = int(message.text)
+        if ref_fund < 0:
+            await message.answer("❌ Количество активаций не может быть отрицательным. Попробуйте ещё раз.", reply_markup=cancel_all_kb())
+            return
+
+        # Получаем данные о чеке из состояния
+        data = await state.get_data()
+        quantity = data.get('quantity')
+        amount_per_check = data.get('amount_per_check')
+        total_amount = data.get('total_amount')
+        referral_percent = data.get('referral_percent')
+
         # Списание с баланса
-        await DB.update_balance(user_id, balance=user_balance - (total_amount + total_amount//100))
+        user_id = message.from_user.id
+        user_balance = await DB.get_user_balance(user_id)
+        await DB.update_balance(user_id, balance=user_balance - (total_amount + total_amount // 100 + total_amount * referral_percent // 100))
 
         # Генерация уникального чека
         uid = str(uuid.uuid4())
-        await DB.create_check(uid=uid, user_id=user_id, type=2, sum=amount_per_check, amount=quantity)
+        await DB.create_check(
+            uid=uid,
+            user_id=user_id,
+            type=2,
+            sum=amount_per_check,
+            amount=quantity,
+            ref_bonus=referral_percent,
+            ref_fund=ref_fund
+        )
 
         check = await DB.get_check_by_uid(uid)
         check_id = check[0]
+        bot_username = (await bot.get_me()).username
         check_link = f"https://t.me/{bot_username}?start=check_{uid}"
 
         add_button1 = InlineKeyboardButton(text="✈ Отправить", switch_inline_query=check_link)
@@ -3676,21 +3808,104 @@ async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSM
         add_button3 = InlineKeyboardButton(text="🔙 Назад", callback_data='checks_menu')
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button2], [add_button3]])
-        await message.answer(f'''
+        await message.answer(
+            f'''
 💸 <b>Ваш мульти-чек создан:</b>
 
 Количество активаций: {quantity}
 Сумма за одну активацию: {amount_per_check} MitCoin
+Реферальный фонд: {ref_fund} активаций
 
 💰 Общая сумма чека: {total_amount} MitCoin
+
+🔗 <b>Реферальная система включена:</b> {referral_percent}%
 
 ❗ Помните, что отправляя кому-либо эту ссылку Вы передаете свои монеты без гарантий получить что-то в ответ
 <i>Вы можете настроить чек с помощью кнопки ниже</i>
 
 <span class="tg-spoiler">{check_link}</span>
-''', reply_markup=keyboard)
+''',
+            reply_markup=keyboard
+        )
 
         await state.clear()
-
     except ValueError:
-        await message.answer("❌ <b>Пожалуйста, введите корректную сумму за одну активацию чека</b>")
+        await message.answer("❌ Пожалуйста, введите корректное число.", reply_markup=cancel_all_kb())
+
+@client.callback_query(F.data == 'disable_referral')
+async def disable_referral(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    # Получаем данные о чеке из состояния
+    data = await state.get_data()
+    quantity = data.get('quantity')
+    amount_per_check = data.get('amount_per_check')
+    total_amount = quantity * amount_per_check
+
+    # Создаем чек без реферального фонда
+    uid = str(uuid.uuid4())
+    await DB.create_check(
+        uid=uid,
+        user_id=callback.from_user.id,
+        type=2,
+        sum=amount_per_check,
+        amount=quantity,
+        ref_bonus=0,
+        ref_fund=0
+    )
+    await DB.update_balance(callback.from_user.id, balance=await DB.get_user_balance(callback.from_user.id) - total_amount)
+
+    bot_username = (await bot.get_me()).username
+    check_link = f"https://t.me/{bot_username}?start=check_{uid}"
+
+    await callback.message.answer(
+        f"✅ <b>Чек успешно создан!</b>\n\n🔗 Ссылка для активации: {check_link}",
+        reply_markup=back_menu_kb()
+    )
+    await state.clear()
+
+@client.callback_query(F.data.startswith('refill_ref_fund_'))
+async def refill_ref_fund(callback: types.CallbackQuery, state: FSMContext):
+    """
+    Запрашивает у пользователя количество активаций для пополнения реферального фонда.
+    """
+    check_id = int(callback.data.split('_')[-1])  # Получаем ID чека из callback_data
+    await state.update_data(check_id=check_id)  # Сохраняем ID чека в состоянии
+
+    await callback.message.answer(
+        "💵 <b>Введите количество активаций для пополнения реферального фонда:</b>",
+        reply_markup=cancel_all_kb()
+    )
+    await state.set_state(checks.refill_ref_fund)
+
+@client.message(checks.refill_ref_fund)
+async def handle_refill_ref_fund(message: types.Message, state: FSMContext, bot: Bot):
+    """
+    Обрабатывает ввод пользователя и пополняет реферальный фонд.
+    """
+    try:
+        ref_fund = int(message.text)  # Получаем количество активаций
+        if ref_fund <= 0:
+            await message.answer("❌ Количество активаций должно быть больше 0.", reply_markup=cancel_all_kb())
+            return
+
+        data = await state.get_data()
+        check_id = data.get('check_id')  # Получаем ID чека из состояния
+
+        # Получаем текущий реферальный фонд
+        check = await DB.get_check_by_id(check_id)
+        current_ref_fund = check[12]  # ref_fund находится в 12-й колонке
+
+        # Обновляем реферальный фонд
+        new_ref_fund = current_ref_fund + ref_fund
+        await DB.update_check2(check_id, ref_fund=new_ref_fund)
+
+        # Уведомляем пользователя об успешном пополнении
+        await message.answer(
+            f"✅ <b>Реферальный фонд успешно пополнен на {ref_fund} активаций.</b>\n\n"
+            f"Теперь доступно {new_ref_fund} активаций.",
+            reply_markup=back_menu_kb()
+        )
+
+
+        await state.clear()
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректное число.", reply_markup=cancel_all_kb())

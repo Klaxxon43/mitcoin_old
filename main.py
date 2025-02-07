@@ -8,7 +8,6 @@ from client import client, start_background_tasks
 from admin import admin
 from db import DB
 from aiogram.client.default import DefaultBotProperties
-from db import db_main
 
 logging.basicConfig(level=logging.INFO)
 
