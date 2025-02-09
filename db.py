@@ -48,9 +48,16 @@ class DataBase:
             await cur.execute('''
                 CREATE TABLE IF NOT EXISTS completed_tasks (
                     user_id INTEGER,
-                    task_id INTEGER
+                    task_id INTEGER,
+                    target_id INTEGER DEFAULT NULL,
+                    task_sum INTEGER DEFAULT NULL,
+                    owner_id INTEGER DEFAULT NULL,
+                    status INTEGER DEFAULT 1,
+                    rem_days INTEGER DEFAULT 7,
+                    id INTEGER PRIMARY KEY NOT NULL
                 )
             ''')
+
             await cur.execute('''
                 CREATE TABLE IF NOT EXISTS chating_tasks (
                     task_id INTEGER PRIMARY KEY NOT NULL,
@@ -85,7 +92,8 @@ class DataBase:
                     report_id INTEGER PRIMARY KEY NOT NULL,
                     task_id INTEGER NOT NULL,
                     chat_id INTEGER NOT NULL,
-                    user_id INTEGER NOT NULL
+                    user_id INTEGER NOT NULL,
+                    description TEXT
                 )
             ''')
             await cur.execute('''
@@ -136,7 +144,7 @@ class DataBase:
             ''')
             await cur.execute('''
                 CREATE TABLE IF NOT EXISTS bonus_time (
-                    user_id INTEGER PRIMARY KEY,
+                    user_id INTEGER PRIMARY KEY UNIQUE,
                     last_bonus_date TEXT
                 )
             ''')
@@ -165,12 +173,96 @@ class DataBase:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP 
             )
         """)
-
             
+            await cur.execute('''
+                PRAGMA table_info(completed_tasks)
+            ''')
+            columns = [info[1] for info in await cur.fetchall()]
+            if 'target_id' not in columns:
+                await cur.execute('''
+                    ALTER TABLE completed_tasks ADD COLUMN target_id INTEGER DEFAULT NULL
+                ''')
+            if 'task_sum' not in columns:
+                await cur.execute('''
+                     ALTER TABLE completed_tasks ADD COLUMN task_sum INTEGER DEFAULT NULL
+                 ''')
+            if 'owner_id' not in columns:
+                await cur.execute('''
+                     ALTER TABLE completed_tasks ADD COLUMN owner_id INTEGER DEFAULT NULL
+                 ''')
+            if 'status' not in columns:
+                await cur.execute('''
+                     ALTER TABLE completed_tasks ADD COLUMN status INTEGER DEFAULT 1
+                 ''')
+            if 'rem_days' not in columns:
+                await cur.execute('''
+                     ALTER TABLE completed_tasks ADD COLUMN rem_days INTEGER DEFAULT 7
+                 ''')
+
+
             
             await self.con.commit()
 
 
+    async def get_active_completed_tasks(self):
+        """Получить активные задания для проверки"""
+        async with self.con.cursor() as cur:
+            await cur.execute('''
+                SELECT * FROM completed_tasks 
+                WHERE status = 1 AND rem_days > 0
+            ''')
+            return await cur.fetchall()
+
+    async def update_completed_task(self, task_id, status=None, rem_days=None):
+        """Обновить данные выполненного задания"""
+        updates = []
+        params = []
+        async with self.con.cursor() as cur:
+            if status is not None:
+                updates.append("status = ?")
+                params.append(status)
+            if rem_days is not None:
+                updates.append("rem_days = ?")
+                params.append(rem_days)
+
+            if updates:
+                params.append(task_id)
+                await cur.execute(f'''
+                    UPDATE completed_tasks 
+                    SET {', '.join(updates)} 
+                    WHERE user_id = ?
+                ''', params)
+                await self.con.commit()
+
+
+
+
+
+    async def is_task_completed_check(self, user_id, task_id):
+        """Проверка, выполнено ли задание пользователем"""
+        async with self.con.cursor() as cur:
+            await cur.execute(
+                'SELECT * FROM completed_tasks WHERE user_id = ? AND task_id = ?',
+                (user_id, task_id)
+            )
+            return await cur.fetchone() is not None
+        
+    async def add_completed_task(self, user_id, task_id, target_id, task_sum, owner_id, status):
+        """Добавление выполненного задания в базу"""
+        async with self.con.cursor() as cur:
+            await cur.execute(
+                'INSERT INTO completed_tasks (user_id, task_id, target_id, task_sum, owner_id, status) VALUES (?, ?, ?, ?, ?, ?)',
+                (user_id, task_id, target_id, task_sum, owner_id, status)
+            )
+            await self.con.commit()
+
+            referrer_id = await self.get_referrer_id(user_id)
+            task = await self.get_task_by_id(task_id)
+            task_type = task[4]
+            if referrer_id:
+                bonus = await self.get_tasks_bonus(task_type)
+                await self.add_balance(user_id=referrer_id, amount=bonus)
+                await self.record_referral_earnings(referrer_id, user_id, bonus)
 
 
     async def get_bonus_ops(self):
@@ -264,19 +356,25 @@ class DataBase:
             ''')
             await self.con.commit()
 
+    async def count_bonus_time_rows(self) -> int:
+        """Асинхронно подсчитывает количество строк в таблице bonus_time."""
+        async with self.con.cursor() as cur:
+            await cur.execute("SELECT COUNT(*) FROM bonus_time")
+            row = await cur.fetchone()
+            return row[0]
 
 
     async def get_statics(self):
-        # Подключение к базе данных
-        async with self.con.cursor() as cur:
-            # Выполнение запроса для получения всех данных из таблицы
-            await cur.execute('SELECT * FROM all_statics')
-            
-            # Получение всех строк
-            rows = await cur.fetchall()
-            
-            # Возврат результата
-            return rows 
+            # Подключение к базе данных
+            async with self.con.cursor() as cur:
+                # Выполнение запроса для получения всех данных из таблицы
+                await cur.execute('SELECT * FROM all_statics')
+                
+                # Получение всех строк
+                rows = await cur.fetchall()
+                
+                # Возврат результата
+                return rows 
 
 
 
@@ -401,29 +499,10 @@ class DataBase:
         connection.row_factory = aiosqlite.Row  # Добавляем row_factory для доступа по ключам
         return connection
 
-    async def get_last_conversion_date(self, user_id: int) -> str:
-        connection = await self.connect()  # Явно ожидаем результат корутины
-        async with connection.execute(
-                "SELECT last_conversion_date FROM conversions WHERE user_id = ?",
-                (user_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            return row["last_conversion_date"] if row else None
-
-    async def update_last_conversion_date(self, user_id: int):
-        """Обновить дату последней конвертации."""
-        async with self.con.cursor() as cur:
-            today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-            await cur.execute('''
-                INSERT INTO conversions (user_id, last_conversion_date)
-                VALUES (?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET last_conversion_date = excluded.last_conversion_date
-            ''', (user_id, today))
-            await self.con.commit()
 
 
 
-
+  
 
 
 
@@ -572,8 +651,8 @@ class DataBase:
             try:
                 await cur.execute('SELECT * FROM checks WHERE uid = ?', (uid,))
                 return await cur.fetchone()
-            except:
-                return None
+            except Exception as e:
+                return None 
 
     async def get_referral_percent(self, check_uid):
         """
@@ -618,14 +697,17 @@ class DataBase:
             await cur.execute('DELETE FROM completed_tasks')
             await self.con.commit()
 
-    async def add_report(self, task_id, chat_id, user_id):
+    async def add_report(self, task_id, chat_id, user_id, description):
         async with self.con.cursor() as cur:
             await cur.execute('SELECT 1 FROM task_reports WHERE chat_id = ?', (chat_id,))
             if await cur.fetchone() is None:
-                await cur.execute('INSERT INTO task_reports (task_id, chat_id, user_id) VALUES (?, ?, ?)',
-                                  (task_id, chat_id, user_id))
+                await cur.execute('''
+                    INSERT INTO task_reports (task_id, chat_id, user_id, description)
+                    VALUES (?, ?, ?, ?)
+                ''', (task_id, chat_id, user_id, description))
                 await self.con.commit()
                 return True
+        return False
 
     async def get_reports(self):
         async with self.con.cursor() as cur:
@@ -715,6 +797,12 @@ class DataBase:
             await cur.execute('SELECT * FROM tasks WHERE user_id = ?', (user_id,))
             return await cur.fetchall()
 
+    async def get_completed_tasks_by_user(self, user_id):
+        """Метод для получения всех задач из базы данных для конкретного user_id"""
+        async with self.con.cursor() as cur:
+            await cur.execute('SELECT * FROM completed_tasks WHERE user_id = ?', (user_id,))
+            return await cur.fetchall()
+        
     async def get_tasks_by_user_admin(self, user_id):
         """Метод для получения всех задач из базы данных для конкретного user_id"""
         async with self.con.cursor() as cur:
@@ -743,7 +831,7 @@ class DataBase:
     async def select_chanel_tasks(self):
         async with self.con.cursor() as cur:
             await cur.execute('SELECT * FROM tasks WHERE type = 1')
-            return await cur.fetchall()
+            return await cur.fetchall() 
 
     # выбирает задачи для ЧАТОВ
     async def select_chat_tasks(self):
@@ -766,22 +854,7 @@ class DataBase:
             )
             return await cur.fetchone() is not None
 
-    async def add_completed_task(self, user_id, task_id):
-        """Добавление выполненного задания в базу"""
-        async with self.con.cursor() as cur:
-            await cur.execute(
-                'INSERT INTO completed_tasks (user_id, task_id) VALUES (?, ?)',
-                (user_id, task_id)
-            )
-            await self.con.commit()
 
-            referrer_id = await self.get_referrer_id(user_id)
-            task = await self.get_task_by_id(task_id)
-            task_type = task[4]
-            if referrer_id:
-                bonus = await self.get_tasks_bonus(task_type)
-                await self.add_balance(user_id=referrer_id, amount=bonus)
-                await self.record_referral_earnings(referrer_id, user_id, bonus)
 
     async def get_tasks_bonus(self, task_type):
         # Здесь определите бонусы для каждого уровня грузовиков
@@ -1042,7 +1115,7 @@ class DataBase:
 
     async def select_user(self, user_id):
         if self.con is None:  # Избегайте повторной инициализации
-            self.con = await aiosqlite.connect('/data/users.db')
+            self.con = await aiosqlite.connect('users.db')
         async with self.con.cursor() as cur:
             await cur.execute('''
                 SELECT * FROM users WHERE user_id = ?

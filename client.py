@@ -64,6 +64,7 @@ class checks(StatesGroup):
     refill_ref_fund_quantity = State()
     set_ref_fund = State()
     refill_ref_fund = State()
+    reffer_id = State()
 
 class convertation(StatesGroup):
     mittorub = State()
@@ -74,7 +75,12 @@ class output(StatesGroup):
     usdt = State()
     rub = State()
 
-
+async def send_message_safe(bot: Bot, chat_id: int, text: str, reply_markup=None):
+    try:
+        await bot.get_chat(chat_id)  # Проверяем, существует ли чат
+        await bot.send_message(chat_id, text, reply_markup=reply_markup)
+    except Exception as e:
+        print(f"Ошибка при отправке сообщения: {e}")
 
 @client.message(F.text.startswith('/start'))
 async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
@@ -96,6 +102,7 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
             if len(ref_parts) == 3:
                 check_uid = ref_parts[1]
                 ref_user_id = int(ref_parts[2])  # ID реферера (пользователя, чья ссылка использовалась)
+                await state.update_data(reffer_id=ref_user_id)  # Обновляем данные для чека
         else:
             # Обработка обычной реферальной ссылки
             referrer_id = int(param)
@@ -103,32 +110,66 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
     # Обработка личных сообщений
     if message.chat.type == 'private':
         if not user:
+            # Пользователь новый
             await DB.add_user(message.from_user.id, message.from_user.username)
-            if referrer_id:
-                # Обычная реферальная система
+            await DB.increment_all_users() 
+            
+            # Если это чековая ссылка, но не реферальная, делаем пользователя рефералом создателя чека
+            if check_uid and not ref_user_id:
+                check = await DB.get_check_by_uid(check_uid)
+                if check:
+                    creator_id = check[2]  # ID создателя чека
+                    await DB.update_user(message.from_user.id, referrer_id=creator_id)
+                    await DB.add_balance(creator_id, 1000)  # Награда за привлечение
+                    await DB.record_referral_earnings(referrer_id=creator_id, referred_user_id=message.from_user.id, amount=1000)
+                    await send_message_safe(bot, creator_id,
+                                           f"👤 Пользователь c ID {message.from_user.id} перешел по вашему чеку и стал вашим рефералом.\n\n💸 Вам начислено 1000 MitCoin за привлечение нового пользователя.",
+                                           reply_markup=back_menu_kb())
+            
+            # Если это обычная реферальная ссылка
+            elif referrer_id:
                 await DB.update_user(message.from_user.id, referrer_id=referrer_id)
                 await DB.add_balance(referrer_id, 1000)
-                await DB.record_referral_earnings(referrer_id=referrer_id, referred_user_id=message.from_user.id,
-                                                  amount=1000)
-                await bot.send_message(referrer_id,
-                                       f"👤 Пользователь c ID {message.from_user.id} перешел по вашей реферальной ссылке\n\n💸 Вам начислено 1000 MitCoin за привлечение нового пользователя.",
+                await DB.record_referral_earnings(referrer_id=referrer_id, referred_user_id=message.from_user.id, amount=1000)
+                await send_message_safe(bot, referrer_id,
+                                       f"👤 Пользователь c ID {message.from_user.id} перешел по вашей реферальной ссылке.\n\n💸 Вам начислено 1000 MitCoin за привлечение нового пользователя.",
                                        reply_markup=back_menu_kb())
+            
+            # Если это реферальная ссылка для чеков
             elif ref_user_id:
-                # Реферальная система для чеков
                 await DB.update_user(message.from_user.id, referrer_id=ref_user_id)
                 await DB.add_balance(ref_user_id, 1000)
-                await DB.record_referral_earnings(referrer_id=ref_user_id, referred_user_id=message.from_user.id,
-                                                  amount=1000)
-                await bot.send_message(ref_user_id,
-                                       f"👤 Пользователь c ID {message.from_user.id} перешел по вашей реферальной ссылке\n\n💸 Вам начислено 1000 MitCoin за привлечение нового пользователя.",
+                await DB.record_referral_earnings(referrer_id=ref_user_id, referred_user_id=message.from_user.id, amount=1000)
+                await send_message_safe(bot, ref_user_id,
+                                       f"👤 Пользователь c ID {message.from_user.id} перешел по вашей реферальной ссылке.\n\n💸 Вам начислено 1000 MitCoin за привлечение нового пользователя.",
                                        reply_markup=back_menu_kb())
 
+        # Если пользователь уже зарегистрирован, но перешел по реферальной ссылке для чеков
         elif ref_user_id:
-            # Если пользователь уже зарегистрирован, но перешел по реферальной ссылке для чеков
             check = await DB.get_check_by_uid(check_uid)
             if check:
                 # Проверяем, есть ли еще активации в реферальном фонде
-                if check[12] > 0:  # ref_fund
+                if check[12] > 0 and check[12]:  # ref_fund
+                    # Проверка подписки на канал
+                    if check[10]:
+                        try:
+                            user_channel_status = await bot.get_chat_member(chat_id=check[10], user_id=message.from_user.id)
+                            if user_channel_status.status not in ['member', 'administrator', 'creator']:
+                                await message.answer(f"💸 <b>Для активации этого чека необходимо подписаться на канал:</b> {check[10]}\n\n<i>После подписки повторите попытку</i>", reply_markup=back_menu_kb())
+                                return
+                        except Exception as e:
+                            logger.error(f'Ошибка при проверке подписки на канал - {e}')
+                            await message.answer(f'😢 <b>В данный момент невозможно проверить подписку, повторите попытку позже</b>\n', reply_markup=back_menu_kb())
+                            return
+
+                    # Проверка пароля
+                    if check[9]:
+                        await message.answer("🔑 <b>Для получения чека необходимо ввести пароль:</b>", reply_markup=back_menu_kb())
+                        await state.set_state(checks.check_password1)
+                        await state.update_data(check_uid=check_uid)
+                        return
+
+                    # Активация чека
                     await DB.add_balance(message.from_user.id, check[4])
                     await DB.process_check_activation(check_uid)
                     await DB.add_activated_check(message.from_user.id, check_uid)
@@ -152,7 +193,8 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
                     )
 
                     # Сообщение рефереру
-                    await bot.send_message(
+                    await send_message_safe(
+                        bot,
                         ref_user_id,
                         f"💸 <b>Пользователь c ID {message.from_user.id} активировал ваш реферальный чек!</b>\n\n"
                         f"💰 <b>Вам начислено {referral_amount} MitCoin за активацию чека.</b>",
@@ -161,7 +203,8 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
 
                     # Если реферальный фонд закончился, уведомляем создателя чека
                     if check[12] - 1 == 0:
-                        await bot.send_message(
+                        await send_message_safe(
+                            bot,
                             check[2],
                             f"⚠️ <b>Реферальный фонд для чека {check_uid} закончился.</b>\n\n"
                             f"💵 Вы можете пополнить реферальный фонд, чтобы продолжить привлекать пользователей.",
@@ -175,9 +218,24 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
         elif check_uid:
             # Активация чека
             check = await DB.get_check_by_uid(check_uid)
-            referral_bonus = str(check[11])  # Получаем процент реферала из столбца ref_bonus
             if check and not await DB.is_check_activated(message.from_user.id, check_uid) and check[2] != message.from_user.id:
                 usname = message.from_user.username
+                name = message.from_user.full_name
+                if usname is None:
+                    usname = name
+                else:
+                    usname = f'@{usname}'
+
+                # Отправляем информацию о чеке
+                check_info = f"💎 <b>Информация о чеке:</b>\n\n" \
+                             f"💸 Сумма: {check[4]} MitCoin\n" \
+                             f"📝 Описание: {check[7] if check[7] else 'Отсутствует'}\n\n"
+                if check[10]:
+                    check_info += f"🔗 Подписка на канал: {check[10]}\n"
+                if check[9]:
+                    check_info += f"🔑 Пароль: Требуется\n"
+                await message.answer(check_info, reply_markup=back_menu_kb())
+
                 if check[3] == 1:  # Сингл-чек
                     if check[7]:
                         if (check[7])[0] == '@':
@@ -185,91 +243,88 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
                                 await message.answer("❌ <b>Этот чек предназначен для другого пользователя</b>", reply_markup=back_menu_kb())
                                 return
                         elif check[7] != message.from_user.id:
-                            await message.answer("❌ <b>Этот чек предназначен для другого пользователя1</b>",
+                            await message.answer("❌ <b>Этот чек предназначен для другого пользователя</b>",
                                                  reply_markup=back_menu_kb())
                             return
 
+                    # Проверка подписки на канал
+                    if check[10]:
+                        try:
+                            user_channel_status = await bot.get_chat_member(chat_id=check[10], user_id=message.from_user.id)
+                            if user_channel_status.status not in ['member', 'administrator', 'creator']:
+                                await message.answer(f"💸 <b>Для активации этого чека необходимо подписаться на канал:</b> {check[10]}\n\n<i>После подписки повторите попытку</i>", reply_markup=back_menu_kb())
+                                return
+                        except Exception as e:
+                            logger.error(f'Ошибка при проверке подписки на канал - {e}')
+                            await message.answer(f'😢 <b>В данный момент невозможно проверить подписку, повторите попытку позже</b>\n', reply_markup=back_menu_kb())
+                            return
+
+                    # Проверка пароля
+                    if check[9]:
+                        await message.answer("🔑 <b>Для получения чека необходимо ввести пароль:</b>", reply_markup=back_menu_kb())
+                        await state.set_state(checks.check_password1)
+                        await state.update_data(check_uid=check_uid)
+                        return
+
+                    # Активация чека
                     await DB.add_balance(message.from_user.id, check[4])
                     await DB.process_check_activation(check_uid)
                     await DB.add_activated_check(message.from_user.id, check_uid)
                     await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
 
-                    name = message.from_user.full_name
-                    if usname == None:
-                        usname = name
-                    else:
-                        usname = f'@{usname}'
-                    await bot.send_message(check[2], text=f'💸 <b>Ваш одноразовый чек на {check[4]} Mit Coin был активирован пользователем {usname}</b>', reply_markup=back_menu_kb())
+                    # Уведомление создателю чека
+                    await send_message_safe(bot, check[2], text=f'💸 <b>Ваш одноразовый чек на {check[4]} MitCoin был активирован пользователем {usname}</b>', reply_markup=back_menu_kb())
                     return
 
                 elif check[3] == 2:  # Мульти-чек
                     if check[5] > 0:
-                        if check[8]:  # Если требуется пароль
+                        # Проверка подписки на канал
+                        if check[10]:
+                            try:
+                                user_channel_status = await bot.get_chat_member(chat_id=check[10], user_id=message.from_user.id)
+                                if user_channel_status.status not in ['member', 'administrator', 'creator']:
+                                    await message.answer(f"💸 <b>Для активации этого чека необходимо подписаться на канал:</b> {check[10]}\n\n<i>После подписки повторите попытку</i>", reply_markup=back_menu_kb())
+                                    return
+                            except Exception as e:
+                                logger.error(f'Ошибка при проверке подписки на канал - {e}')
+                                await message.answer(f'😢 <b>В данный момент невозможно проверить подписку, повторите попытку позже</b>\n', reply_markup=back_menu_kb())
+                                return
+
+                        # Проверка пароля
+                        if check[9]:
                             await message.answer("🔑 <b>Для получения чека необходимо ввести пароль:</b>", reply_markup=back_menu_kb())
                             await state.set_state(checks.check_password1)
                             await state.update_data(check_uid=check_uid)
                             return
 
-                        if check[9]:
-                            try:
-                                bot_member = await bot.get_chat_member(check[9], user_id=message.from_user.id)
-                                if bot_member.status == "member":
-                                    await DB.add_balance(message.from_user.id, check[4])
-                                    await DB.process_check_activation(check_uid)
-                                    await DB.add_activated_check(message.from_user.id, check_uid)
-
-                                    # Если чек активирован по реферальной ссылке, начисляем награду рефереру
-                                    if ref_user_id:
-                                        referral_bonus = check[11]  # Получаем процент реферала из столбца ref_bonus
-                                        referral_amount = (check[4] * referral_bonus) // 100
-                                        await DB.add_balance(ref_user_id, referral_amount)
-                                        await bot.send_message(ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
-
-                                    # Отправляем уведомление создателю чека
-                                    await bot.send_message(check[2], f"💸 Ваш чек на {check[4]} MitCoin был активирован пользователем {usname}.")
-
-                                    # Создаем реферальную ссылку для текущего пользователя
-                                    bot_username = (await bot.get_me()).username
-                                    referral_link = f"https://t.me/{bot_username}?start=ref_{check_uid}_{message.from_user.id}"
-                                    await message.answer(
-                                        f"🔗 <b>Ваша реферальная ссылка:</b>\n{referral_link}\n\n"
-                                        f"💸 <b>Распространяйте эту ссылку и получайте {referral_bonus}% от суммы чека за каждого привлеченного пользователя!</b>",
-                                        reply_markup=back_menu_kb()
-                                    )
-
-                                    await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
-                                    return
-                                else:
-                                    await message.answer(f"💸 <b>Для активации этого чека необходимо подписаться на канал:</b> {check[9]}\n\n<i>После подписки повторите попытку</i>", reply_markup=back_menu_kb())
-                                    return
-
-                            except Exception as e:
-                                print(f'Ошибка при получении чека - {e}')
-                                await message.answer('😢 <b>В данный момент невозможно активировать этот чек, повторите попытку позже</b>', reply_markup=back_menu_kb())
-                                return
-
+                        # Активация чека
                         await DB.add_balance(message.from_user.id, check[4])
                         await DB.process_check_activation(check_uid)
                         await DB.add_activated_check(message.from_user.id, check_uid)
 
                         # Если чек активирован по реферальной ссылке, начисляем награду рефереру
-                        if ref_user_id:
-                            print(referral_bonus)
+                        if ref_user_id and check[11]:
+                            referral_bonus = check[11]
                             referral_amount = (check[4] * int(referral_bonus)) // 100
                             await DB.add_balance(ref_user_id, referral_amount)
-                            await bot.send_message(ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
+                            await send_message_safe(bot, ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
 
-                        # Отправляем уведомление создателю чека
-                        await bot.send_message(check[2], f"💸 Ваш чек на {check[4]} MitCoin был активирован пользователем {usname}.")
+                        # Уведомление создателю чека
+                        await send_message_safe(bot, check[2], f"💸 Ваш чек на {check[4]} MitCoin был активирован пользователем {usname}.")
 
                         # Создаем реферальную ссылку для текущего пользователя
-                        bot_username = (await bot.get_me()).username
-                        referral_link = f"https://t.me/{bot_username}?start=ref_{check_uid}_{message.from_user.id}"
-                        await message.answer(
-                            f"🔗 <b>Ваша реферальная ссылка:</b>\n{referral_link}\n\n"
-                            f"💸 <b>Распространяйте эту ссылку и получайте {str(referral_bonus)}% от суммы чека за каждого привлеченного пользователя!</b>",
-                            reply_markup=back_menu_kb()
-                        )
+                        if check[11] and not ref_user_id:
+                            referral_bonus = check[11]
+                            referral_amount = (check[4] * int(referral_bonus)) // 100
+                            await DB.add_balance(ref_user_id, referral_amount)
+                            await send_message_safe(bot, ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
+                            bot_username = (await bot.get_me()).username
+                            referral_link = f"https://t.me/{bot_username}?start=ref_{check_uid}_{message.from_user.id}"
+                            await message.answer(
+                                f"🔗 <b>Ваша реферальная ссылка:</b>\n{referral_link}\n\n"
+                                f"💸 <b>Распространяйте эту ссылку и получайте {str(referral_bonus)}% от суммы чека за каждого привлеченного пользователя!</b>",
+                                reply_markup=back_menu_kb()
+                            ) 
 
                         await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
                         return
@@ -282,7 +337,7 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
                 return
 
         # Основное меню
-        await DB.increment_all_users()
+        
         await message.answer(
             "💎 <b>PR MIT</b> - <em>мощный и уникальный инструмент для рекламы ваших проектов</em>\n\n<b>Главное меню</b>",
             reply_markup=menu_kb())
@@ -291,27 +346,55 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
     elif message.chat.type in ['group', 'supergroup'] and not check_uid:
         await message.answer("Для получения информации используйте бота в личных сообщениях.")
 
+
 @client.message(checks.check_password1)
-async def handle_check_password(message: types.Message, state: FSMContext):
+async def handle_check_password(message: types.Message, state: FSMContext, bot: Bot):
     user_data = await state.get_data()
     check_uid = user_data.get("check_uid")
-    print(check_uid)
+    data = await state.get_data()
+    ref_user_id = data.get("reffer_id")
+    name = message.from_user.full_name
+    usname = message.from_user.username
+    if usname is None:
+        usname = name
+    else:
+        usname = f'@{usname}'
+
     if not check_uid:
         await message.answer("❌ <i>Возникла ошибка. Повторите попытку позже...</i>", reply_markup=back_menu_kb())
         await state.clear()
         return
 
     check = await DB.get_check_by_uid(check_uid)
-    print(check)
     if not check:
         await message.answer("❌ Чек не найден или уже был активирован.", reply_markup=back_menu_kb())
         await state.clear()
         return
-    print(message.text)
-    if message.text == check[8]:  # Проверка пароля
+
+    if message.text == check[9]:  # Проверка пароля
         await DB.add_balance(message.from_user.id, check[4])
         await DB.process_check_activation(check_uid)
         await DB.add_activated_check(user_id=message.from_user.id, uid=check_uid)
+
+        # Если чек активирован по реферальной ссылке, начисляем награду рефереру
+        if ref_user_id and check[11]:
+            referral_bonus = check[11]  # Получаем процент реферала из столбца ref_bonus
+            referral_amount = (check[4] * referral_bonus) // 100
+            await DB.add_balance(ref_user_id, referral_amount)
+            await send_message_safe(bot, ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
+
+            # Уведомление создателю чека
+            await send_message_safe(bot, check[2], f"💸 Ваш чек на {check[4]} MitCoin был активирован пользователем {usname}.")
+
+            # Создаем реферальную ссылку для текущего пользователя
+            bot_username = (await bot.get_me()).username
+            referral_link = f"https://t.me/{bot_username}?start=ref_{check_uid}_{message.from_user.id}"
+            await message.answer(
+                f"🔗 <b>Ваша реферальная ссылка:</b>\n{referral_link}\n\n"
+                f"💸 <b>Распространяйте эту ссылку и получайте {referral_bonus}% от суммы чека за каждого привлеченного пользователя!</b>",
+                reply_markup=back_menu_kb()
+            )
+
         await message.answer(f"🥳 <b>Вы успешно активировали чек на {check[4]} MitCoin</b>", reply_markup=back_menu_kb())
         await state.clear()
     else:
@@ -388,11 +471,12 @@ async def stats_menu_handler(callback: types.CallbackQuery):
     user_count = len(await DB.select_all())
     all_tasks = len(await DB.get_tasks())
     calculate_total_cost = await DB.calculate_total_cost()
-    statics = await DB.get_statics()
+    statics = await DB.get_statics() 
     print(statics)
     id, chanels, groups, all, see, u = statics[0] 
     id2, chanels2, groups2, all2, see2, users = statics[1] 
     balance = await DB.all_balance()
+    gifts = await DB.count_bonus_time_rows()
     text = f"""
     <b>🌐 Статистика 🌐 </b>
 
@@ -414,6 +498,7 @@ async def stats_menu_handler(callback: types.CallbackQuery):
 👥 Подписались на группы: {groups}
 👁️ Общее количество просмотров: {see}
 💸Баланс всех пользователей: {balance} MC
+🎁Собрано подарков: {gifts}
 
 """
 
@@ -1262,7 +1347,7 @@ semaphore = asyncio.Semaphore(2)  # Ограничение одновремен�
 async def cache_all_tasks(bot, DB):
     """Кэшируем задания на каналы только при доступности ссылки и добавляем название канала."""
     all_tasks = await DB.select_chanel_tasks()
-    tasks_with_links = []
+    tasks_with_links = [] 
     print(f'все задания в бд - {len(all_tasks)}')
 
     async with semaphore:
@@ -1293,7 +1378,7 @@ async def cache_all_tasks(bot, DB):
                         await asyncio.sleep(wait_time)  # Ждем перед повторной попыткой
                         retry_count += 1
                     else:
-                        print(f'Ошибка при создании кэша: {e}')
+                        print(f'Ошибка при создании кэша: {e}') 
                         break  # Если ошибка не связана с лимитом, выходим из цикла
 
     # Сохраняем все задачи с доступными ссылками и названиями каналов в кэш
@@ -1344,103 +1429,71 @@ async def start_background_tasks(bot, DB):
     # Запускаем задачу обновления кэша раз в 5 минут
     asyncio.create_task(scheduled_cache_update(bot, DB))
     asyncio.create_task(scheduled_cache_update_chat(bot, DB))
+    asyncio.create_task(check_subscriptions_periodically(bot))
+
 
 
 @client.callback_query(F.data == 'work_chanel')
 async def taskss_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-    chanelpage = 1  # Начальная страница
 
-    # Получаем все задачи с ссылками из кэша и фильтруем
-    all_tasks = task_cache.get('all_tasks', [])
-    print(f'все задания кэш - {len(all_tasks)}')
-    tasks = [
-        task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
-    ]
-    print(f'задания для пользователя {user_id} - {len(tasks)}')
-    if tasks:
-        # Сортируем задачи по количеству подписчиков
-        random.shuffle(tasks)
-        print(f'сортированные задания {user_id} - {len(tasks)}')
-        # Пагинация и генерация клавиатуры
-        tasks_on_page, total_pages = await paginate_tasks_chanel(tasks, chanelpage)
-        keyboard = await generate_tasks_keyboard_chanel(tasks_on_page, chanelpage, total_pages, bot)
+    try:
+        # Получаем все задачи с ссылками из кэша и фильтруем
+        all_tasks = task_cache.get('all_tasks', [])
+        print(f'все задания кэш - {len(all_tasks)}')
+        tasks = [
+            task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
+        ]
+        print(f'задания для пользователя {user_id} - {len(tasks)}')
+        
+        if tasks:
+            # Сортируем задачи по количеству подписчиков
+            random.shuffle(tasks)
+            print(f'сортированные задания {user_id} - {len(tasks)}')
+            
+            # Генерация клавиатуры
+            keyboard = await generate_tasks_keyboard_chanel(tasks, bot)
 
+            await callback.message.edit_text(
+                "📢 <b>Задания на каналы:</b>\n\n🎢 Каналы в списке располагаются по количеству необходимых подписчиков\n\n⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
+                reply_markup=keyboard
+            )
+        else:
+            await callback.message.edit_text(
+                "На данный момент доступных заданий нет, возвращайся позже 😉",
+                reply_markup=back_work_menu_kb()
+            )
+    except Exception as e:
+        print(f"Ошибка в taskss_handler: {e}")
+        markup = InlineKeyboardBuilder()
+        markup.row(types.InlineKeyboardButton(text='🔄 Обновить', callback_data='work_chanel'))
         await callback.message.edit_text(
-            "📢 <b>Задания на каналы:</b>\n\n🎢 Каналы в списке располагаются по количеству необходимых подписчиков\n\n⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-            reply_markup=keyboard
-        )
-    else:
-        await callback.message.edit_text(
-            "На данный момент доступных заданий нет, возвращайся позже 😉",
-            reply_markup=back_work_menu_kb()
-        )
-
-
-# Обработчик для смены страниц
-@client.callback_query(lambda c: c.data.startswith("chanelpage_"))
-async def change_page_handler(callback: types.CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-    chanelpage = int(callback.data.split('_')[1])  # Начальная страница
-
-    # Получаем все задачи с ссылками из кэша и фильтруем
-    all_tasks = task_cache.get('all_tasks', [])
-    tasks = [
-        task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
-    ]
-    if tasks:
-        # Сортируем задачи по количеству подписчиков
-        random.shuffle(tasks)
-
-        # Пагинация и генерация клавиатуры
-        tasks_on_page, total_pages = await paginate_tasks_chanel(tasks, chanelpage)
-        keyboard = await generate_tasks_keyboard_chanel(tasks_on_page, chanelpage, total_pages, bot)
-
-        await callback.message.edit_text(
-            "📢 <b>Задания на каналы:</b>\n\n🎢 Каналы в списке располагаются по количеству необходимых подписчиков\n\n⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-            reply_markup=keyboard
-        )
-    else:
-        await callback.message.edit_text(
-            "На данный момент доступных заданий нет, возвращайся позже 😉",
-            reply_markup=back_work_menu_kb()
+            "Произошла ошибка при загрузке заданий. Попробуйте обновить страницу.",
+            reply_markup=markup.as_markup()
         )
 
 
 # Функция для генерации клавиатуры с заданиями
-async def generate_tasks_keyboard_chanel(tasks, chanelpage, total_pages, bot):
+async def generate_tasks_keyboard_chanel(tasks, bot):
     builder = InlineKeyboardBuilder()
 
-    # Выводим задания на текущей странице (по 5 на страницу)
-    for task in tasks:
+    # Выводим задания (по 5 на страницу)
+    for task in tasks[:5]:  # Ограничиваем количество заданий на одной странице
         chat_id = task[2]
         chat_title = task[5]
 
         from aiogram.types import Chat
-        chat: Chat  = await bot.get_chat(chat_id)
+        chat: Chat = await bot.get_chat(chat_id)
         button_text = f"{chat.title} | +1500"
         builder.row(types.InlineKeyboardButton(text=button_text, callback_data=f"chaneltask_{task[0]}"))
 
     # Кнопка "Назад"
     builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
 
-    # Кнопки пагинации
-    pagination = []
-    if chanelpage > 1:
-        pagination.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"chanelpage_{chanelpage - 1}"))
-    pagination.append(types.InlineKeyboardButton(text=str(chanelpage), callback_data="current_page"))
-    if chanelpage < total_pages:
-        pagination.append(types.InlineKeyboardButton(text="➡️", callback_data=f"chanelpage_{chanelpage + 1}"))
-    builder.row(*pagination)  # Кнопки пагинации в одну строку
+    # Кнопка "Обновить"
+    builder.row(types.InlineKeyboardButton(text="🔄 Обновить", callback_data="work_chanel"))
+
     return builder.as_markup()
-
-
-async def paginate_tasks_chanel(tasks, chanelpage=1, per_page=5):
-    total_pages = (len(tasks) + per_page - 1) // per_page  # Вычисление общего количества страниц
-    start_idx = (chanelpage - 1) * per_page
-    end_idx = start_idx + per_page
-    tasks_on_page = tasks[start_idx:end_idx]
-    return tasks_on_page, total_pages
 
 
 async def check_admin_and_get_invite_link_chanel(bot, target_id):
@@ -1515,7 +1568,7 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
 
         # Шаг 4. Обновляем задание (вычитаем amount на 1)
         await DB.update_task_amount(task_id)
-        await DB.add_completed_task(user_id, task_id)
+        await DB.add_completed_task(user_id, task_id, target_id, 1500, task[1], status=1)
         await DB.add_balance(amount=1500, user_id=user_id)
         # Проверяем, нужно ли удалить задание
         updated_task = await DB.get_task_by_id(task_id)
@@ -1546,7 +1599,7 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
     if tasks:
         random.shuffle(tasks)
         chanelpage = 1
-        tasks_on_page, total_pages = await paginate_tasks_chanel(tasks, chanelpage)
+        tasks_on_page, total_pages = await generate_tasks_keyboard_chanel(tasks, chanelpage)
         keyboard = await generate_tasks_keyboard_chanel(tasks_on_page, chanelpage, total_pages, bot)
         await callback.message.edit_text(
             "📢 <b>Задания на каналы:</b>\n\n🎢 Каналы в списке располагаются по количеству необходимых подписчиков\n\n⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
@@ -1554,117 +1607,111 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
     else:
         await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
                                          reply_markup=back_work_menu_kb())
+        
+    if not await DB.is_task_completed(user_id, task[0]):
+        await DB.update_task_amount(task_id)
+        await DB.add_completed_task(user_id, task_id, target_id, 1500, task[1], status=1)
 
+
+class ChanelReport(StatesGroup):
+    desc = State()
 
 @client.callback_query(F.data.startswith('chanelreport_'))
-async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
+async def request_chanel_report_description(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     await callback.answer()
     task_id = int(callback.data.split('_')[1])
     task = await DB.get_task_by_id(task_id)
-    user_id = callback.from_user.id
     target_id = task[2]
 
-    chat = await bot.get_chat(target_id)
-    builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="⚠️ Подтвердить", callback_data=f"chanelreportconfirm_{task_id}"))
-    builder.add(types.InlineKeyboardButton(text="❌ Отмена", callback_data=f"chaneltask_{task_id}"))
-    await callback.message.edit_text(f'⚠️ Вы уверены, что хотите пожаловаться на канал <b>{chat.title}</b>?',
-                                     reply_markup=builder.as_markup())
+    # Сохраняем task_id в состояние пользователя
+    await state.update_data(task_id=task_id, target_id=target_id)
 
+    # Запрашиваем описание проблемы
+    await callback.message.edit_text("⚠️ Пожалуйста, опишите проблему с этим каналом. Например, канал не соответствует правилам или содержит недопустимый контент.")
+    await state.set_state(ChanelReport.desc)
 
-@client.callback_query(F.data.startswith('chanelreportconfirm_'))
-async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
-    await callback.answer()
-    task_id = int(callback.data.split('_')[1])
-    task = await DB.get_task_by_id(task_id)
-    user_id = callback.from_user.id
-    target_id = task[2]
-    chat = await bot.get_chat(target_id)
-    await DB.add_report(task_id=task_id, chat_id=target_id, user_id=user_id)
-    await callback.message.edit_text(f'⚠️ Жалоба на канал <b>{chat.title}</b> отправлена!')
-    await asyncio.sleep(1)
+@client.message(ChanelReport.desc)
+async def save_chanel_report_description(message: types.Message, bot: Bot, state: FSMContext):
+    user_id = message.from_user.id
+    description = message.text
 
-    # Получаем все задачи с ссылками из кэша и фильтруем
-    all_tasks = task_cache.get('all_tasks', [])
-    tasks = [
-        task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
-    ]
+    # Получаем task_id и target_id из состояния
+    data = await state.get_data()
+    task_id = data.get("task_id")
+    target_id = data.get("target_id")
 
-    if tasks:
-        random.shuffle(tasks)
-        chanelpage = 1
-        tasks_on_page, total_pages = await paginate_tasks_chanel(tasks, chanelpage)
-        keyboard = await generate_tasks_keyboard_chanel(tasks_on_page, chanelpage, total_pages, bot)
-        await callback.message.edit_text(
-            "📢 <b>Задания на каналы:</b>\n\n🎢 Каналы в списке располагаются по количеству необходимых подписчиков\n\n⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-            reply_markup=keyboard)
+    if task_id and target_id:
+        # Добавляем репорт в базу данных
+        await DB.add_report(task_id=task_id, chat_id=target_id, user_id=user_id, description=description)
+
+        # Отправляем подтверждение
+        chat = await bot.get_chat(target_id)
+        await message.answer(f'⚠️ Жалоба на канал <b>{chat.title}</b> отправлена!')
+        await asyncio.sleep(1)
+
+        # Возвращаем пользователя к списку заданий
+        all_tasks = task_cache.get('all_tasks', [])
+        tasks = [task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])]
+
+        if tasks:
+            random.shuffle(tasks)
+            chanelpage = 1
+            tasks_on_page, total_pages = await generate_tasks_keyboard_chanel(tasks, chanelpage)
+            keyboard = await generate_tasks_keyboard_chanel(tasks_on_page, chanelpage, total_pages, bot)
+            await message.answer(
+                "📢 <b>Задания на каналы:</b>\n\n🎢 Каналы в списке располагаются по количеству необходимых подписчиков\n\n⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
+                reply_markup=keyboard)
+        else:
+            await message.answer("На данный момент доступных заданий нет, возвращайся позже 😉",
+                                 reply_markup=back_work_menu_kb())
     else:
-        await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb())
+        await message.answer("Ошибка: не удалось получить данные о задании.")
+
+    # Сбрасываем состояние
+    await state.clear()
 
 
 @client.callback_query(F.data == 'work_chat')
 async def tasksschat_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-    chatpage = 1  # Начальная страница
 
-    # Получаем все задачи с ссылками из кэша и фильтруем
-    all_tasks = task_cache_chat.get('all_tasks', [])
-    tasks = [
-        task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
-    ]
+    try:
+        # Получаем все задачи с ссылками из кэша и фильтруем
+        all_tasks = task_cache_chat.get('all_tasks', [])
+        tasks = [
+            task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
+        ]
 
-    if tasks:
-        random.shuffle(tasks)
-        tasks_on_page, total_pages = await paginate_tasks_chat(tasks, chatpage)
-        keyboard = await generate_tasks_keyboard_chat(tasks_on_page, chatpage, total_pages, bot)
+        if tasks:
+            random.shuffle(tasks)
+            keyboard = await generate_tasks_keyboard_chat(tasks, bot)
 
+            await callback.message.edit_text(
+                "👤 <b>Задания на чаты:</b>\n\n🎢 Чаты в списке располагаются по количеству необходимых участников\n\n⚡<i>Запрещено покидать чат раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
+                reply_markup=keyboard
+            )
+        else:
+            await callback.message.edit_text(
+                "На данный момент доступных заданий нет, возвращайся позже 😉",
+                reply_markup=back_work_menu_kb()
+            )
+    except Exception as e:
+        print(f"Ошибка в tasksschat_handler: {e}")
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text="🔄 Обновить", callback_data="work_chat"))
         await callback.message.edit_text(
-            "👤 <b>Задания на чаты:</b>\n\n🎢 Чаты в списке располагаются по количеству необходимых участников\n\n⚡<i>Запрещено покидать чат раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-            reply_markup=keyboard)
-    else:
-        await callback.message.edit_text(
-            "На данный момент доступных заданий нет, возвращайся позже 😉",
-            reply_markup=back_work_menu_kb()
-        )
+                "Произошла ошибка при загрузке заданий. Попробуйте обновить страницу.",
+            reply_markup=builder.as_markup()            )
 
-
-# Обработчик для смены страниц
-@client.callback_query(lambda c: c.data.startswith("chatpage_"))
-async def change_page_handler(callback: types.CallbackQuery, bot: Bot):
-    chatpage = int(callback.data.split('_')[1])
-    user_id = callback.from_user.id
-
-    # Получаем все задачи с ссылками из кэша и фильтруем
-    all_tasks = task_cache_chat.get('all_tasks', [])
-    tasks = [
-        task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
-    ]
-
-    if tasks:
-        random.shuffle(tasks)
-        tasks_on_page, total_pages = await paginate_tasks_chat(tasks, chatpage)
-        keyboard = await generate_tasks_keyboard_chat(tasks_on_page, chatpage, total_pages, bot)
-
-        await callback.message.edit_text(
-            "👤 <b>Задания на чаты:</b>\n\n🎢 Чаты в списке располагаются по количеству необходимых участников\n\n⚡<i>Запрещено покидать чат раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-            reply_markup=keyboard)
-    else:
-        await callback.message.edit_text(
-            "На данный момент доступных заданий нет, возвращайся позже 😉",
-            reply_markup=back_work_menu_kb()
-        )
 
 
 # Функция для генерации клавиатуры с заданиями
-async def generate_tasks_keyboard_chat(tasks, chatpage, total_pages, bot):
+async def generate_tasks_keyboard_chat(tasks, bot):
     builder = InlineKeyboardBuilder()
 
-    # Выводим задания на текущей странице (по 5 на страницу)
-    for task in tasks:
+    # Выводим задания (по 5 на страницу)
+    for task in tasks[:5]:  # Ограничиваем количество заданий на одной странице
         chat_id = task[2]
-
-        amount = task[3]
         chat_title = task[5]
 
         button_text = f"{chat_title} | +1500"
@@ -1673,25 +1720,10 @@ async def generate_tasks_keyboard_chat(tasks, chatpage, total_pages, bot):
     # Кнопка "Назад"
     builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
 
-    # Кнопки пагинации
-    pagination = []
-    if chatpage > 1:
-        pagination.append(types.InlineKeyboardButton(text="⬅️", callback_data=f"chatpage_{chatpage - 1}"))
-    pagination.append(types.InlineKeyboardButton(text=str(chatpage), callback_data="current_page"))
-    if chatpage < total_pages:
-        pagination.append(types.InlineKeyboardButton(text="➡️", callback_data=f"chatpage_{chatpage + 1}"))
-
-    builder.row(*pagination)  # Кнопки пагинации в одну строку
+    # Кнопка "Обновить"
+    builder.row(types.InlineKeyboardButton(text="🔄 Обновить", callback_data="work_chat"))
 
     return builder.as_markup()
-
-
-async def paginate_tasks_chat(tasks, chatpage=1, per_page=5):
-    total_pages = (len(tasks) + per_page - 1) // per_page  # Вычисление общего количества страниц
-    start_idx = (chatpage - 1) * per_page
-    end_idx = start_idx + per_page
-    tasks_on_page = tasks[start_idx:end_idx]
-    return tasks_on_page, total_pages
 
 
 async def check_admin_and_get_invite_link_chat(bot, target_id):
@@ -1699,8 +1731,8 @@ async def check_admin_and_get_invite_link_chat(bot, target_id):
         ChatFullInfo = await bot.get_chat(target_id)
         invite_link = ChatFullInfo.invite_link
         return invite_link
-
     except Exception as e:
+        print(e)
         return False
 
 
@@ -1711,8 +1743,6 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
     task = await DB.get_task_by_id(task_id)
 
     amount = task[3]
-
-    invite_link = ""
 
     invite_link = await check_admin_and_get_invite_link_chat(bot, task[2])
     chat_id = task[2]
@@ -1738,11 +1768,13 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
     if task is None:
         await callback.message.edit_text("❗ Задание не найдено или уже выполнено", reply_markup=back_menu_kb())
         await asyncio.sleep(1)
+        return
+
     user_id = callback.from_user.id
     target_id = task[2]
     invite_link = await check_admin_and_get_invite_link_chat(bot, task[2])
 
-    # Проверяем, подписан ли пользователь на канал
+    # Проверяем, подписан ли пользователь на чат
     try:
         bot_member = await bot.get_chat_member(target_id, callback.message.chat.id)
         if bot_member.status != "member":
@@ -1753,7 +1785,8 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
                 f"🚩 Пожалуйста, <b>вступите в чат</b> по ссылке {invite_link} и повторите попытку",
                 reply_markup=builder.as_markup())
             return
-    except:
+    except Exception as e:
+        print(f"Ошибка при проверке подписки: {e}")
         builder = InlineKeyboardBuilder()
         builder.add(types.InlineKeyboardButton(text="🔙", callback_data="work_chat"))
         builder.add(types.InlineKeyboardButton(text="Проверить 🔄️", callback_data=f"chatcheck_{task_id}"))
@@ -1764,10 +1797,11 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
         return
 
     if not await DB.is_task_completed(user_id, task[0]):
-        # Шаг 4. Обновляем задание (вычитаем amount на 1)
+        # Обновляем задание (вычитаем amount на 1)
         await DB.update_task_amount(task_id)
-        await DB.add_completed_task(user_id, task_id)
+        await DB.add_completed_task(user_id, task_id, target_id, 1500, task[1], status=1)
         await DB.add_balance(amount=1500, user_id=user_id)
+
         # Проверяем, нужно ли удалить задание
         updated_task = await DB.get_task_by_id(task_id)
         if updated_task[3] == 0:
@@ -1777,7 +1811,7 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
             await bot.send_message(creator_id, f"🎉 Одно из ваших заданий было успешно выполнено",
                                    reply_markup=back_menu_kb())
 
-        await DB.increment_all_subs_group() 
+        await DB.increment_all_subs_group()
         await DB.increment_all_taasks()
         await callback.message.edit_text("✅")
         await callback.answer("+1500")
@@ -1785,7 +1819,8 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
     else:
         await callback.message.edit_text("‼ Вы уже выполнили это задание", reply_markup=back_menu_kb())
         await asyncio.sleep(3)
-    # Получаем все задачи с ссылками из кэша и фильтруем
+
+    # Обновляем список заданий после выполнения
     all_tasks = task_cache_chat.get('all_tasks', [])
     tasks = [
         task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
@@ -1793,200 +1828,266 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
 
     if tasks:
         random.shuffle(tasks)
-        chatpage = 1
-        tasks_on_page, total_pages = await paginate_tasks_chat(tasks, chatpage)
-        keyboard = await generate_tasks_keyboard_chat(tasks_on_page, chatpage, total_pages, bot)
+        keyboard = await generate_tasks_keyboard_chat(tasks, bot)
         await callback.message.edit_text(
             "👤 <b>Задания на чаты:</b>\n\n🎢 Чаты в списке располагаются по количеству необходимых участников\n\n⚡<i>Запрещено покидать чат раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-            reply_markup=keyboard)
+            reply_markup=keyboard
+        )
     else:
-        await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb())
+        await callback.message.edit_text(
+            "На данный момент доступных заданий нет, возвращайся позже 😉",
+            reply_markup=back_work_menu_kb()
+        )
 
+
+class ChatReport(StatesGroup):
+    desc = State()
 
 @client.callback_query(F.data.startswith('chatreport_'))
-async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
+async def request_chat_report_description(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     await callback.answer()
     task_id = int(callback.data.split('_')[1])
     task = await DB.get_task_by_id(task_id)
-
     target_id = task[2]
 
-    chat = await bot.get_chat(target_id)
-    builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="⚠️ Подтвердить", callback_data=f"chatreportconfirm_{task_id}"))
-    builder.add(types.InlineKeyboardButton(text="❌ Отмена", callback_data=f"chattask_{task_id}"))
-    await callback.message.edit_text(f'⚠️ Вы уверены, что хотите пожаловаться на чат <b>{chat.title}</b>?',
-                                     reply_markup=builder.as_markup())
+    # Сохраняем task_id в состояние пользователя
+    await state.update_data(task_id=task_id, target_id=target_id)
 
+    # Запрашиваем описание проблемы
+    await callback.message.edit_text("⚠️ Пожалуйста, опишите проблему с этим чатом. Например, чат не соответствует правилам или содержит недопустимый контент.")
+    await state.set_state(ChatReport.desc)
 
-@client.callback_query(F.data.startswith('chatreportconfirm_'))
-async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
-    await callback.answer()
-    task_id = int(callback.data.split('_')[1])
-    task = await DB.get_task_by_id(task_id)
-    user_id = callback.from_user.id
-    target_id = task[2]
-    chat = await bot.get_chat(target_id)
-    await DB.add_report(task_id=task_id, chat_id=target_id, user_id=user_id)
-    await callback.message.edit_text(f'⚠️ Жалоба на чат <b>{chat.title}</b> отправлена!')
-    await asyncio.sleep(1)
+@client.message(ChatReport.desc)
+async def save_chat_report_description(message: types.Message, bot: Bot, state: FSMContext):
+    user_id = message.from_user.id
+    description = message.text
 
-    # Получаем все задачи с ссылками из кэша и фильтруем
-    all_tasks = task_cache_chat.get('all_tasks', [])
-    tasks = [
-        task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
-    ]
+    # Получаем task_id и target_id из состояния
+    data = await state.get_data()
+    task_id = data.get("task_id")
+    target_id = data.get("target_id")
 
-    if tasks:
-        random.shuffle(tasks)
-        chatpage = 1
-        tasks_on_page, total_pages = await paginate_tasks_chat(tasks, chatpage)
-        keyboard = await generate_tasks_keyboard_chat(tasks_on_page, chatpage, total_pages, bot)
-        await callback.message.edit_text(
-            "👤 <b>Задания на чаты:</b>\n\n🎢 Чаты в списке располагаются по количеству необходимых участников\n\n⚡<i>Запрещено покидать чат раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-            reply_markup=keyboard)
+    if task_id and target_id:
+        # Добавляем репорт в базу данных
+        await DB.add_report(task_id=task_id, chat_id=target_id, user_id=user_id, description=description)
+
+        # Отправляем подтверждение
+        chat = await bot.get_chat(target_id)
+        await message.answer(f'⚠️ Жалоба на чат <b>{chat.title}</b> отправлена!')
+        await asyncio.sleep(1)
+
+        # Возвращаем пользователя к списку заданий
+        all_tasks = task_cache_chat.get('all_tasks', [])
+        tasks = [task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])]
+
+        if tasks:
+            random.shuffle(tasks)
+            chatpage = 1
+            keyboard = await generate_tasks_keyboard_chat(tasks, bot)
+            await message.answer(
+                "👤 <b>Задания на чаты:</b>\n\n🎢 Чаты в списке располагаются по количеству необходимых участников\n\n⚡<i>Запрещено покидать чат раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
+                reply_markup=keyboard)
+        else:
+            await message.answer("На данный момент доступных заданий нет, возвращайся позже 😉",
+                                 reply_markup=back_work_menu_kb())
     else:
-        await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb())
+        await message.answer("Ошибка: не удалось получить данные о задании.")
 
+    # Сбрасываем состояние
+    await state.clear()
 
 @client.callback_query(F.data == 'work_post')
 async def works_post_handler(callback: types.CallbackQuery, bot: Bot):
-
     user_id = callback.from_user.id
-    all_tasks = await DB.select_post_tasks()  # Получаем список всех заданий
 
-    if all_tasks:
+    try:
+        # Получаем все задания на посты
+        all_tasks = await DB.select_post_tasks()
+        print(f"Все задания: {all_tasks}")  # Отладочное сообщение
 
-        available_tasks = [task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])]
-
-        if not available_tasks:
-            await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
-                                             reply_markup=back_work_menu_kb())
+        if not all_tasks:
+            builder = InlineKeyboardBuilder()
+            builder.add(types.InlineKeyboardButton(text="🔄 Обновить", callback_data="work_post"))
+            await callback.message.edit_text(
+                "На данный момент заданий на посты нет, возвращайся позже 😉",
+                reply_markup=builder.as_markup()
+            )
             return
 
-        for task in available_tasks:
-            task_id, target_id, amount = task[0], task[2], task[3]
+        # Фильтруем задания, которые пользователь ещё не выполнил
+        available_tasks = [task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])]
+        print(f"Доступные задания: {available_tasks}")  # Отладочное сообщение
+
+        if not available_tasks:
+            builder = InlineKeyboardBuilder()
+            builder.add(types.InlineKeyboardButton(text="🔄 Обновить", callback_data="work_post"))
+            await callback.message.edit_text(
+                "На данный момент заданий на посты нет, возвращайся позже 😉",
+                reply_markup=builder.as_markup()
+            )
+            return
+
+        # Отображаем первое доступное задание
+        task = available_tasks[0]
+        task_id, target_id, amount = task[0], task[2], task[3]
+        print(f"Задание: task_id={task_id}, target_id={target_id}, amount={amount}")  # Отладочное сообщение
+
+        # Проверяем формат target_id
+        try:
             chat_id, message_id = map(int, target_id.split(":"))
-            user_id = callback.from_user.id
-            try:
-                builder = InlineKeyboardBuilder()
-                builder.add(types.InlineKeyboardButton(text="🔙", callback_data="work_menu"))
-                builder.add(types.InlineKeyboardButton(text="Дальше ⏭️", callback_data=f"work_post"))
-                builder.add(types.InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"postreport_{task_id}"))
-                await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
-                await callback.message.answer_sticker(
-                    'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
-                await asyncio.sleep(3)
+            print(f"Chat ID: {chat_id}, Message ID: {message_id}")  # Отладочное сообщение
+        except ValueError as e:
+            print(f"Ошибка в формате target_id: {e}")
+            await callback.message.answer("Ошибка: некорректный формат задания.")
+            return
 
-                await callback.message.answer(
-                    f"👀 <b>Просмотрели пост? +250 MITcoin</b>\n\nНажмите кнопку для просмотра следующего поста",
-                    reply_markup=builder.as_markup())
+        # Формируем клавиатуру
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
+        builder.add(types.InlineKeyboardButton(text="🔄 Обновить", callback_data="work_post"))
+        builder.add(types.InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"postreport_{task_id}"))
 
-                await DB.update_task_amount(task_id)
-                updated_task = await DB.get_task_by_id(task_id)
-                await DB.add_completed_task(user_id, task_id)
-                await DB.add_balance(amount=250, user_id=user_id)
-                if updated_task[3] == 0:
-                    delete_task = await DB.get_task_by_id(task_id)
-                    creator_id = delete_task[1]
-                    await DB.delete_task(task_id)
-                    await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на пост было успешно выполнено!",
-                                           reply_markup=back_menu_kb())
+        # Пересылаем пост пользователю
+        await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
+        await callback.message.answer_sticker(
+            'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE'
+        )
+        await asyncio.sleep(3)
 
-                return
-            except Exception as e:
-                print(f"Ошибка: {e}")
-                continue
+        # Отправляем сообщение с кнопками
+        await callback.message.answer(
+            f"👀 <b>Просмотрели пост? +250 MITcoin</b>\n\nНажмите кнопку для просмотра следующего поста",
+            reply_markup=builder.as_markup()
+        )
 
-        # Если все задания были пропущены
-        await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb())
-    else:
-        await callback.message.edit_text("На данный момент заданий на посты нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb())
+        # Обновляем количество выполнений задания
+        await DB.update_task_amount(task_id)
+        updated_task = await DB.get_task_by_id(task_id)
 
+        # Добавляем задание в список выполненных
+        await DB.add_completed_task(user_id, task_id, target_id, 250, task[1], status=0)
+        await DB.add_balance(amount=250, user_id=user_id)
+
+        # Если задание выполнено полностью, удаляем его
+        if updated_task[3] == 0:
+            delete_task = await DB.get_task_by_id(task_id)
+            creator_id = delete_task[1]
+            await DB.delete_task(task_id)
+            await DB.increment_all_see()
+            await DB.increment_all_taasks()
+            await bot.send_message(
+                creator_id,
+                f"🎉 Одно из ваших заданий на пост было успешно выполнено!",
+                reply_markup=back_menu_kb()
+            )
+
+    except Exception as e:
+        print(f"Ошибка в works_post_handler: {e}")
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text="🔄 Обновить", callback_data="work_post"))
+        await callback.message.edit_text(
+            "Произошла ошибка при загрузке заданий. Попробуйте обновить страницу.",
+            reply_markup=builder.as_markup()
+        )
+        
+
+class PostReport(StatesGroup):
+    desc = State()
 
 @client.callback_query(F.data.startswith('postreport_'))
-async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
-    await callback.answer()
+async def request_post_report_description(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     task_id = int(callback.data.split('_')[1])
-    task = await DB.get_task_by_id(task_id)
-    user_id = callback.from_user.id
-    target_id = task[2]
-
-    builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="⚠️ Подтвердить", callback_data=f"postreportconfirm_{task_id}"))
-    builder.add(types.InlineKeyboardButton(text="❌ Отмена", callback_data=f"work_post"))
-    await callback.message.edit_text(f'⚠️ Вы уверены, что хотите пожаловаться на этот пост?',
-                                     reply_markup=builder.as_markup())
-
-
-@client.callback_query(F.data.startswith('postreportconfirm_'))
-async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
     await callback.answer()
-    task_id = int(callback.data.split('_')[1])
-    task = await DB.get_task_by_id(task_id)
-    user_id = callback.from_user.id
-    target_id = task[2]
 
-    await DB.add_report(task_id=task_id, chat_id=target_id, user_id=user_id)
-    await callback.message.edit_text(f'⚠️ Жалоба на пост отправлена!')
-    await asyncio.sleep(1)
+    # Сохраняем task_id в состояние пользователя
+    await state.update_data(task_id=task_id)
 
-    all_tasks = await DB.select_post_tasks()  # Получаем список всех заданий
-    if all_tasks:
-        available_tasks = [task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])]
-        if not available_tasks:
-            await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
-                                             reply_markup=back_work_menu_kb())
-            return
-        for task in available_tasks:
-            task_id, target_id, amount = task[0], task[2], task[3]
-            chat_id, message_id = map(int, target_id.split(":"))
-            user_id = callback.from_user.id
-            try:
-                builder = InlineKeyboardBuilder()
-                builder.add(types.InlineKeyboardButton(text="🔙", callback_data="work_menu"))
-                builder.add(types.InlineKeyboardButton(text="Дальше ⏭️", callback_data=f"work_post"))
-                builder.add(types.InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"postreport_{task_id}"))
-                await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
-                await callback.message.answer_sticker(
-                    'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
-                await asyncio.sleep(3)
+    # Запрашиваем описание проблемы
+    await callback.message.edit_text(
+        "⚠️ Пожалуйста, опишите проблему с этим постом. Например, пост не соответствует правилам или содержит недопустимый контент."
+    )
+    await state.set_state(PostReport.desc)
 
-                await callback.message.answer(
-                    f"👀 <b>Просмотрели пост? +250 MITcoin</b>\n\nНажмите кнопку для просмотра следующего поста",
-                    reply_markup=builder.as_markup())
+@client.message(PostReport.desc)
+async def save_post_report_description(message: types.Message, bot: Bot, state: FSMContext):
+    user_id = message.from_user.id
+    description = message.text
 
-                await DB.update_task_amount(task_id)
-                updated_task = await DB.get_task_by_id(task_id)
+    # Получаем task_id из состояния
+    data = await state.get_data()
+    task_id = data.get("task_id")
 
-                await DB.add_completed_task(user_id, task_id)
-                await DB.add_balance(amount=250, user_id=user_id)
+    if task_id:
+        task = await DB.get_task_by_id(task_id)
+        if task:
+            target_id = task[2]
 
-                if updated_task[3] == 0:
-                    delete_task = await DB.get_task_by_id(task_id)
-                    creator_id = delete_task[1]
-                    await DB.delete_task(task_id)
-                    await DB.increment_all_see()
-                    await DB.increment_all_taasks()
-                    await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на пост было успешно выполнено!",
-                                           reply_markup=back_menu_kb())
+            # Добавляем репорт в базу данных
+            await DB.add_report(task_id=task_id, chat_id=target_id, user_id=user_id, description=description)
 
-                return
-            except Exception as e:
-                print(f"Ошибка: {e}")
-                continue
+            # Отправляем подтверждение
+            await message.answer("⚠️ Жалоба на пост отправлена!")
+            await asyncio.sleep(1)
 
-        # Если все задания были пропущены
-        await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
+            # Возвращаем пользователя к списку заданий
+            all_tasks = await DB.select_post_tasks()
+            if all_tasks:
+                available_tasks = [task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])]
+                if not available_tasks:
+                    await message.answer("На данный момент доступных заданий нет, возвращайся позже 😉",
                                          reply_markup=back_work_menu_kb())
+                    return
+
+                for task in available_tasks:
+                    task_id, target_id, amount = task[0], task[2], task[3]
+                    chat_id, message_id = map(int, target_id.split(":"))
+                    try:
+                        builder = InlineKeyboardBuilder()
+                        builder.add(types.InlineKeyboardButton(text="🔙", callback_data="work_menu"))
+                        builder.add(types.InlineKeyboardButton(text="Дальше ⏭️", callback_data=f"work_post"))
+                        builder.add(types.InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"postreport_{task_id}"))
+                        await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
+                        await message.answer_sticker(
+                            'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
+                        await asyncio.sleep(3)
+
+                        await message.answer(
+                            f"👀 <b>Просмотрели пост? +250 MITcoin</b>\n\nНажмите кнопку для просмотра следующего поста",
+                            reply_markup=builder.as_markup())
+
+                        await DB.update_task_amount(task_id)
+                        updated_task = await DB.get_task_by_id(task_id)
+
+                        await DB.add_completed_task(user_id, task_id, target_id, 250, task[1], status=0)
+                        await DB.add_balance(amount=250, user_id=user_id)
+
+                        if updated_task[3] == 0:
+                            delete_task = await DB.get_task_by_id(task_id)
+                            creator_id = delete_task[1]
+                            await DB.delete_task(task_id)
+                            await DB.increment_all_see()
+                            await DB.increment_all_taasks()
+                            await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на пост было успешно выполнено!",
+                                                   reply_markup=back_menu_kb())
+
+                        return
+                    except Exception as e:
+                        print(f"Ошибка: {e}")
+                        continue
+
+                # Если все задания были пропущены
+                await message.answer("На данный момент доступных заданий нет, возвращайся позже 😉",
+                                     reply_markup=back_work_menu_kb())
+            else:
+                await message.answer("На данный момент заданий на посты нет, возвращайся позже 😉",
+                                     reply_markup=back_work_menu_kb())
+        else:
+            await message.answer("Задание не найдено.")
     else:
-        await callback.message.edit_text("На данный момент заданий на посты нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb())
+        await message.answer("Ошибка: не удалось получить данные о задании.")
 
+    # Сбрасываем состояние
+    await state.clear()
 
 # Назначим текстовые представления для типов заданий
 TASK_TYPES = {
@@ -2827,9 +2928,10 @@ async def help_handler(message: types.Message, state: FSMContext):
 async def setup_op(message: types.Message, bot: Bot):
     # Проверяем, является ли пользователь администратором чата
     user_id = message.from_user.id
-    chat_id = message.chat.id
+    chat_id = message.text.split()[1]
 
     if not await is_user_admin(user_id, chat_id, bot):
+        await message.answer(f'Бот не является администратором в {chat_id}')
         return  # Игнорируем команды от неадминистраторов
 
     # Разбираем команду и проверяем указанный канал
@@ -3668,6 +3770,8 @@ async def handle_check_amount(callback: types.CallbackQuery, bot: Bot):
 
 
 
+
+
 @client.callback_query(F.data == 'multi_check')
 async def create_multi_check(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
@@ -3753,7 +3857,7 @@ async def enable_referral(callback: types.CallbackQuery, state: FSMContext):
     builder.add(types.InlineKeyboardButton(text="50%", callback_data='referral_percent_50'))
     builder.add(types.InlineKeyboardButton(text="75%", callback_data='referral_percent_75'))
     builder.add(types.InlineKeyboardButton(text="100%", callback_data='referral_percent_100'))
-    await callback.message.edit_text("📊 <b>Выберите процент, который будут получать рефералы:</b>", reply_markup=builder.as_markup())
+    await callback.message.edit_text("📊 <b>Выберите процент от суммы чека, который будут получать рефералы:</b>", reply_markup=builder.as_markup())
 
 @client.callback_query(F.data.startswith('referral_percent_'))
 async def set_referral_percent(callback: types.CallbackQuery, state: FSMContext):
@@ -3778,13 +3882,20 @@ async def handle_set_ref_fund(message: types.Message, state: FSMContext, bot: Bo
         data = await state.get_data()
         quantity = data.get('quantity')
         amount_per_check = data.get('amount_per_check')
-        total_amount = data.get('total_amount')
+        total_amount = data.get('total_amount') 
         referral_percent = data.get('referral_percent')
+
+        # Рассчитываем общую сумму списания
+        total_deduction = total_amount + (total_amount * (referral_percent / 100) * ref_fund) 
 
         # Списание с баланса
         user_id = message.from_user.id
         user_balance = await DB.get_user_balance(user_id)
-        await DB.update_balance(user_id, balance=user_balance - (total_amount + total_amount // 100 + total_amount * referral_percent // 100))
+        if user_balance < total_deduction:
+            await message.answer("❌ Недостаточно средств на балансе для создания чека с учётом реферального фонда.", reply_markup=cancel_all_kb())
+            return
+
+        await DB.update_balance(user_id, balance=user_balance - total_deduction)
 
         # Генерация уникального чека
         uid = str(uuid.uuid4())
@@ -3817,8 +3928,7 @@ async def handle_set_ref_fund(message: types.Message, state: FSMContext, bot: Bo
 Реферальный фонд: {ref_fund} активаций
 
 💰 Общая сумма чека: {total_amount} MitCoin
-
-🔗 <b>Реферальная система включена:</b> {referral_percent}%
+💼 Реферальный процент: {referral_percent}%
 
 ❗ Помните, что отправляя кому-либо эту ссылку Вы передаете свои монеты без гарантий получить что-то в ответ
 <i>Вы можете настроить чек с помощью кнопки ниже</i>
@@ -3848,8 +3958,8 @@ async def disable_referral(callback: types.CallbackQuery, state: FSMContext, bot
         type=2,
         sum=amount_per_check,
         amount=quantity,
-        ref_bonus=0,
-        ref_fund=0
+        ref_bonus=None,
+        ref_fund=None
     )
     await DB.update_balance(callback.from_user.id, balance=await DB.get_user_balance(callback.from_user.id) - total_amount)
 
@@ -3857,8 +3967,21 @@ async def disable_referral(callback: types.CallbackQuery, state: FSMContext, bot
     check_link = f"https://t.me/{bot_username}?start=check_{uid}"
 
     await callback.message.answer(
-        f"✅ <b>Чек успешно создан!</b>\n\n🔗 Ссылка для активации: {check_link}",
-        reply_markup=back_menu_kb()
+            f'''
+💸 <b>Ваш мульти-чек создан:</b>
+
+Количество активаций: {quantity}
+Сумма за одну активацию: {amount_per_check} MitCoin
+Реферальный фонд: отсутствует
+
+💰 Общая сумма чека: {total_amount} MitCoin
+💼 Реферальный процент: отсутствует
+
+❗ Помните, что отправляя кому-либо эту ссылку Вы передаете свои монеты без гарантий получить что-то в ответ
+<i>Вы можете настроить чек с помощью кнопки ниже</i>
+
+<span class="tg-spoiler">{check_link}</span>
+''',        reply_markup=back_menu_kb()
     )
     await state.clear()
 
@@ -3909,3 +4032,138 @@ async def handle_refill_ref_fund(message: types.Message, state: FSMContext, bot:
         await state.clear()
     except ValueError:
         await message.answer("❌ Пожалуйста, введите корректное число.", reply_markup=cancel_all_kb())
+
+
+# Добавляем в db.py новые методы
+
+async def get_active_completed_tasks(self):
+    """Получить активные задания для проверки"""
+    async with self.con.cursor() as cur:
+        await cur.execute('''
+            SELECT * FROM completed_tasks 
+            WHERE status = 1 AND rem_days > 0
+        ''')
+        return await cur.fetchall()
+
+async def update_completed_task(self, task_id, status=None, rem_days=None):
+    """Обновить данные выполненного задания"""
+    updates = []
+    params = []
+    async with self.con.cursor() as cur:
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        if rem_days is not None:
+            updates.append("rem_days = ?")
+            params.append(rem_days)
+        
+        if updates:
+            params.append(task_id)
+            await cur.execute(f'''
+                UPDATE completed_tasks 
+                SET {', '.join(updates)} 
+                WHERE rowid = ?
+            ''', params)
+            await self.con.commit()
+
+# Добавляем в client.py
+async def check_subscriptions_periodically(bot: Bot):
+    while True:
+        await asyncio.sleep(30)  # Каждые 2 часа
+        print('провожу проверку')
+        try:
+            active_tasks = await DB.get_active_completed_tasks()
+            print(active_tasks)
+            for task in active_tasks:
+                user_id, task_id, target_id, task_sum, owner_id, status, rem_days, *_ = task
+                
+                # Проверка подписки
+                try:
+                    member = await bot.get_chat_member(target_id, user_id)
+                    print('member: '+ str(member))
+                    is_subscribed = member.status in ['member', 'administrator', 'creator']
+                except Exception:
+                    is_subscribed = False
+
+                if not is_subscribed:
+                    # Отправка предупреждения
+                    try:
+                        chat = await bot.get_chat(target_id)
+                        invite_link = chat.invite_link
+                        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="Подписаться", url=invite_link)]
+                        ])
+                        
+                        await bot.send_message(
+                            user_id,
+                            f"⚠️ Вы отписались от {chat.title}!\n"
+                            "Пожалуйста, подпишитесь снова в течение 2 часов, "
+                            f"иначе будет списано {task_sum} MITcoin!",
+                            reply_markup=keyboard
+                        )
+                        
+                        # Ждем 2 часа и проверяем снова
+                        await asyncio.sleep(30)
+                        member = await bot.get_chat_member(target_id, user_id)
+                        is_subscribed = member.status in ['member', 'administrator', 'creator']
+                        
+                        if not is_subscribed:
+                            # Списание средств
+                            await DB.add_balance(user_id, -task_sum)
+                            await DB.add_balance(owner_id, task_sum)
+                            await DB.update_completed_task(user_id, status=0) 
+                            
+                            await bot.send_message(
+                                user_id,
+                                f"❌ Вам списан штраф {task_sum} MITcoin "
+                                f"за отписку от {chat.title}!"
+                            )
+                            await bot.send_message(
+                                owner_id,
+                                f"💸 Вам возвращено {task_sum} MITcoin "
+                                f"от пользователя {user_id} за отписку"
+                            )
+                            
+                    except Exception as e:
+                        print(f"Ошибка обработки штрафа: {e}")
+
+            # Ежедневное уменьшение rem_days
+            if datetime.datetime.now().hour == 0:  # В полночь
+                await DB.con.execute('''
+                    UPDATE completed_tasks 
+                    SET rem_days = rem_days - 1 
+                    WHERE status = 1 AND rem_days > 0
+                ''')
+                await DB.con.commit()
+                
+        except Exception as e:
+            print(f"Ошибка в фоновой задаче: {e}")
+
+
+# Обработчик команды /report
+@client.message(Command('report'))
+async def send_report(message: types.Message, bot: Bot):
+    # Проверяем, что текст после команды /report не пустой
+    if len(message.text.split()) > 1:
+        report_text = ' '.join(message.text.split()[1:])  # Получаем текст после команды /report
+        
+        # Формируем сообщение для админов
+        admin_message = (
+            f"🚨 **Новый репорт!** 🚨\n\n"
+            f"👤 **Пользователь:** @{message.from_user.username}\n"
+            f"🆔 **ID:** `{message.from_user.id}`\n"
+            f"📝 **Текст репорта:**\n{report_text}"
+        )
+        from config import ADMINS_ID
+        # Отправляем сообщение всем админам
+        for admin_id in ADMINS_ID:
+            try:
+                await bot.send_message(admin_id, admin_message)
+            except Exception as e:
+                logging.error(f"Не удалось отправить сообщение админу {admin_id}: {e}")
+        
+        # Отправляем подтверждение пользователю
+        await message.reply("✅ Ваш репорт успешно отправлен админам!")
+    else:
+        await message.reply("⚠️ Пожалуйста, укажите текст репорта после команды /report.")
+

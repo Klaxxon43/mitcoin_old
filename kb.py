@@ -76,7 +76,7 @@ def work_menu_kb():
 
 def menu_kb():
     ikb = InlineKeyboardBuilder()
-    ikb.button(text='💸 Заработать', callback_data='work_menu')
+    ikb.button(text='💸 Заработать', callback_data='work_menu') 
     ikb.button(text='👥 Рекламировать', callback_data='pr_menu')
     ikb.button(text='📄 ОП', callback_data='op_help_menu')
     ikb.button(text='💻 Профиль', callback_data='profile')

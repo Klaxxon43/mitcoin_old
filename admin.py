@@ -1285,6 +1285,8 @@ ID задания - <code>{task_id}</code>
 
 Ссылка на канал/чат - {invite_link}
 
+Описание проблемы: <code>{report[4]}</code>
+
 <i>Выберите нужный вариант действия:</i>    
     """
     keyboard_builder = InlineKeyboardBuilder()

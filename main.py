@@ -46,6 +46,7 @@ async def run_scheduler(bot: Bot):
         await daily_task(bot)
 
 
+
 async def main():
     bot = Bot(API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
