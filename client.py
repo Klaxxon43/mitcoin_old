@@ -4069,7 +4069,7 @@ async def update_completed_task(self, task_id, status=None, rem_days=None):
 # Добавляем в client.py
 async def check_subscriptions_periodically(bot: Bot):
     while True:
-        await asyncio.sleep(30)  # Каждые 2 часа
+        await asyncio.sleep(7200)  # Каждые 2 часа
         print('провожу проверку')
         try:
             active_tasks = await DB.get_active_completed_tasks()
@@ -4103,7 +4103,7 @@ async def check_subscriptions_periodically(bot: Bot):
                         )
                         
                         # Ждем 2 часа и проверяем снова
-                        await asyncio.sleep(30)
+                        await asyncio.sleep(7200)
                         member = await bot.get_chat_member(target_id, user_id)
                         is_subscribed = member.status in ['member', 'administrator', 'creator']
                         
