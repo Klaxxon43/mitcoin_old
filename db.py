@@ -109,7 +109,8 @@ class DataBase:
                     locked_for_user INTEGER,
                     password TEXT,
                     OP_id TEXT,
-                    ref_bonus INTEGER
+                    ref_bonus INTEGER,
+                    ref_fund INTEGER
                 )
             ''')
 

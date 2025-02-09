@@ -1181,7 +1181,7 @@ async def successful_payment_handler(message: types.Message, bot: Bot):
         amount = int(parts[3])  # Преобразуем amount
     except (ValueError, IndexError) as e:
         await message.answer("☹  Произошла ошибка при обработке оплаты, обратитесь в тех. поддержку с чеком, который доступен выше")
-        print(f"Error parsing payload: {payload} - {e}")
+        print(f"Error parsing payload: {payload} - {e}") 
         return
 
     if amount == 100000:
@@ -1197,7 +1197,7 @@ async def successful_payment_handler(message: types.Message, bot: Bot):
     elif amount == 5000000:
         stars = 2499
     else:
-        stars = amount / 2000
+        stars = amount / 3000
 
     dep_stats = stars * 0.013
     # Зачисляем MITcoin на баланс пользователя
@@ -1219,7 +1219,7 @@ async def successful_payment_handler(message: types.Message, bot: Bot):
 @client.callback_query(F.data == 'buy_stars')
 async def buystars_handler(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
-    await callback.message.edit_text("<b>Вы можете обменять свои Telegram Stars на Mit Coin по курсу:</b>\n\n1⭐ = 2000 Mit Coin\n\n<b>Введите количество звезд, которое вы хотите продать</b>", reply_markup=back_menu_kb())
+    await callback.message.edit_text("<b>Вы можете обменять свои Telegram Stars на Mit Coin по курсу:</b>\n\n1⭐ = 3000 Mit Coin\n\n<b>Введите количество звезд, которое вы хотите продать</b>", reply_markup=back_menu_kb())
     await state.set_state(buystars.buystars)
 
 
@@ -3310,7 +3310,7 @@ async def sendmitdrops(callback: types.CallbackQuery, state: FSMContext):
     add_button1 = InlineKeyboardButton(text="🔙 Назад", callback_data=f"check_{check_id}")
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button], [add_button1]])
     await callback.message.edit_text('''
-<b>Вы можете разместить свой чек в @mitcoindrops</b> 
+<b>Вы можете разместить свой чек в @mitcoin_drops</b> 
 
 <b>Условия размещения:</b>
 1) Чек без пароля
@@ -3348,10 +3348,10 @@ async def sendmitdrops1(callback: types.CallbackQuery, state: FSMContext, bot: B
         try:
             add_button = InlineKeyboardButton(text="Получить", url=check_link)
             keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button]])
-            await bot.send_message(chat_id='-1002277582115', text=text, reply_markup=keyboard)
-            await callback.message.edit_text('🥳 Чек успешно размещен в @mitcoindrops',reply_markup=back_menu_kb())
+            await bot.send_message(chat_id='-1002446297366', text=text, reply_markup=keyboard)
+            await callback.message.edit_text('🥳 Чек успешно размещен в @mitcoin_drops',reply_markup=back_menu_kb())
         except:
-            await callback.message.edit_text('Ошибка размещения чека в @mitcoindrops, попробуйте позже или обратитеть в тех поддержку', reply_markup=back_menu_kb())
+            await callback.message.edit_text('Ошибка размещения чека в @mitcoin_drops, попробуйте позже или обратитеть в тех поддержку', reply_markup=back_menu_kb())
     else:
         await callback.message.edit_text(
             '❌ Ваш чек не подходит по условиям',
@@ -3884,10 +3884,13 @@ async def handle_set_ref_fund(message: types.Message, state: FSMContext, bot: Bo
         amount_per_check = data.get('amount_per_check')
         total_amount = data.get('total_amount') 
         referral_percent = data.get('referral_percent')
-
+        print(total_amount)
+        total_amount = total_amount//quantity 
+        print(total_amount)
         # Рассчитываем общую сумму списания
-        total_deduction = total_amount + (total_amount * (referral_percent / 100) * ref_fund) 
-
+        total_deduction = total_amount * quantity + ( total_amount * (referral_percent / 100) * ref_fund ) 
+        print(total_deduction) 
+        print(f'{total_amount} * {quantity} + ( {total_amount} * ({referral_percent / 100}) * {ref_fund} ) = {total_deduction}')
         # Списание с баланса
         user_id = message.from_user.id
         user_balance = await DB.get_user_balance(user_id)
@@ -3898,7 +3901,7 @@ async def handle_set_ref_fund(message: types.Message, state: FSMContext, bot: Bo
         await DB.update_balance(user_id, balance=user_balance - total_deduction)
 
         # Генерация уникального чека
-        uid = str(uuid.uuid4())
+        uid = str(uuid.uuid4()) 
         await DB.create_check(
             uid=uid,
             user_id=user_id,
@@ -3949,6 +3952,7 @@ async def disable_referral(callback: types.CallbackQuery, state: FSMContext, bot
     quantity = data.get('quantity')
     amount_per_check = data.get('amount_per_check')
     total_amount = quantity * amount_per_check
+    print(f'{quantity} * {amount_per_check}')
 
     # Создаем чек без реферального фонда
     uid = str(uuid.uuid4())
@@ -4128,7 +4132,7 @@ async def check_subscriptions_periodically(bot: Bot):
                         print(f"Ошибка обработки штрафа: {e}")
 
             # Ежедневное уменьшение rem_days
-            if datetime.datetime.now().hour == 0:  # В полночь
+            if datetime.datetime.now().hour == 0 or datetime.datetime.now().hour == 1:  # В полночь
                 await DB.con.execute('''
                     UPDATE completed_tasks 
                     SET rem_days = rem_days - 1 
@@ -4148,11 +4152,12 @@ async def send_report(message: types.Message, bot: Bot):
         report_text = ' '.join(message.text.split()[1:])  # Получаем текст после команды /report
         
         # Формируем сообщение для админов
-        admin_message = (
-            f"🚨 **Новый репорт!** 🚨\n\n"
-            f"👤 **Пользователь:** @{message.from_user.username}\n"
-            f"🆔 **ID:** `{message.from_user.id}`\n"
-            f"📝 **Текст репорта:**\n{report_text}"
+        admin_message = (f"""
+      🚨 <b>Новый репорт!</b> 🚨
+👤 <b>Пользователь:</b> @{message.from_user.username}
+🆔 <b>ID:</b> <code>{message.from_user.id}</code>\n
+📝 <b>Текст репорта:</b>
+<blockquote>{report_text}</blockquote>"""
         )
         from config import ADMINS_ID
         # Отправляем сообщение всем админам
