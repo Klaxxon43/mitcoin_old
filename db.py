@@ -205,6 +205,24 @@ class DataBase:
             await self.con.commit()
 
 
+    async def get_top_users(self, admins_id):
+        async with self.con.cursor() as cur:
+            # Преобразуем список admins_id в кортеж
+            admins_tuple = tuple(admins_id)
+            
+            # Выбираем топ-10 пользователей по балансу, исключая админов
+            await cur.execute('''
+                SELECT user_id, username, balance 
+                FROM users 
+                WHERE user_id NOT IN ({}) 
+                ORDER BY balance DESC 
+                LIMIT 10
+            '''.format(','.join('?' * len(admins_tuple))), admins_tuple)
+            
+            top_users = await cur.fetchall()  # Получаем результат запроса
+            return top_users 
+        
+
     async def get_active_completed_tasks(self):
         """Получить активные задания для проверки"""
         async with self.con.cursor() as cur:
@@ -416,12 +434,9 @@ class DataBase:
                 WHERE user_id NOT IN (:id1, :id2, :id3, :id4);
                 """
                 params = {'id1': ADMINS_ID[0], 'id2': ADMINS_ID[1], 'id3': ADMINS_ID[2], 'id4': ADMINS_ID[3]}
-                print(f"Запрос: {query}, Параметры: {params}")
                 result = await cur.execute(query, params)
                 row = await result.fetchone()
-                print(f"Результат запроса: {row}")
                 total_balance = row[0] if row else 0
-                print(f"Общая сумма баланса: {total_balance}")
                 return total_balance 
         except Exception as e:
             print(f"Ошибка: {e}")

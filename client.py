@@ -21,6 +21,8 @@ import pytz
 from aiocryptopay import AioCryptoPay, Networks
 import requests
 import uuid
+from config import ADMINS_ID
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -501,8 +503,11 @@ async def stats_menu_handler(callback: types.CallbackQuery):
 🎁Собрано подарков: {gifts}
 
 """
-
-    await callback.message.edit_text(text, reply_markup=back_menu_kb())
+    build = InlineKeyboardBuilder()
+    build.add(InlineKeyboardButton(text='🏆Рейтинг', callback_data='rating'))
+    build.add(InlineKeyboardButton(text="Назад 🔙", callback_data='back_stats'))
+    build.adjust(1)
+    await callback.message.edit_text(text, reply_markup=build.as_markup())
     await callback.answer()
 
 
@@ -1919,11 +1924,9 @@ async def works_post_handler(callback: types.CallbackQuery, bot: Bot):
         print(f"Доступные задания: {available_tasks}")  # Отладочное сообщение
 
         if not available_tasks:
-            builder = InlineKeyboardBuilder()
-            builder.add(types.InlineKeyboardButton(text="🔄 Обновить", callback_data="work_post"))
             await callback.message.edit_text(
                 "На данный момент заданий на посты нет, возвращайся позже 😉",
-                reply_markup=builder.as_markup()
+                reply_markup=back_menu_kb()
             )
             return
 
@@ -4172,3 +4175,31 @@ async def send_report(message: types.Message, bot: Bot):
     else:
         await message.reply("⚠️ Пожалуйста, укажите текст репорта после команды /report.")
 
+
+
+# Команда /top
+@client.callback_query(F.data.startswith('rating'))
+async def show_top(callback: types.CallbackQuery):
+    top_users = await DB.get_top_users(ADMINS_ID)
+    print(top_users)
+    
+    # Создаем клавиатуру с рейтингом
+    keyboard = InlineKeyboardBuilder()
+
+    for i in range(len(top_users)):
+        user_id, username, balance = top_users[i]
+        if i+1 == 1:
+            emoji = "🥇"
+        elif i+1 == 2:
+            emoji = "🥈"
+        elif i+1 == 3:
+            emoji = "🥉"
+        else:
+            emoji = "🔹"
+        keyboard.add(InlineKeyboardButton(text=f"{emoji}{i+1}. {username} - {balance} 💰", url='https://t.me/'+ username))
+    keyboard.add(InlineKeyboardButton(text="Назад 🔙", callback_data='menu_stats'))
+    keyboard.adjust(1) 
+
+    
+    # Отправляем сообщение с рейтингом
+    await callback.message.edit_text("🏆 Топ-10 пользователей по балансу 🏆", reply_markup=keyboard.as_markup())
