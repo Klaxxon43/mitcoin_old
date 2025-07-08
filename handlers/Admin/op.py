@@ -1,7 +1,7 @@
 from aiogram import F, types
 from aiogram.fsm.context import FSMContext
 from untils.Imports import *
-from .states import create_op_tasks, create_opbonus_tasks
+from .states import *
 from untils.kb import admin_kb, back_menu_kb
 from .admin import admin
 
@@ -237,3 +237,155 @@ def paginate_tasks(tasks, chatingpage=1, per_page=5):
     end_idx = start_idx + per_page
     tasks_on_page = tasks[start_idx:end_idx]
     return tasks_on_page, total_pages
+
+
+
+@admin.callback_query(F.data =='show_op')
+async def show_op(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+
+    if user_id not in ADMINS_ID:
+        await callback.message.answer("У вас нет прав для выполнения этой команды.")
+        return
+
+    channels = await DB.all_channels_op()
+    if not channels:
+        kb = InlineKeyboardBuilder()
+        kb.add(InlineKeyboardButton(text='Добавить ОП',callback_data='add_op'))
+        kb.add(InlineKeyboardButton(text='Выход',callback_data='admin_kb'))
+        kb.adjust(1)
+        await callback.message.answer("Список каналов ОП пуст.", reply_markup=kb.as_markup())
+
+        return
+
+    keyboard = InlineKeyboardBuilder()
+    for channel in channels:
+        channel_id, channel_name = channel
+        keyboard.add(InlineKeyboardButton(text=channel_name, callback_data=f"channel:{channel_id}"))
+    keyboard.add(InlineKeyboardButton(text='Добавить ОП',callback_data='add_op'))
+    keyboard.add(InlineKeyboardButton(text='Выход',callback_data='admin_kb'))
+    keyboard.adjust(1)
+    await callback.message.answer("Список каналов ОП:", reply_markup=keyboard.as_markup())
+
+
+
+# Команда /add_channel
+@admin.callback_query(F.data == 'add_op')
+async def add_channel(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+
+    # Проверяем, является ли пользователь администратором
+    if user_id not in ADMINS_ID:
+        await callback.message.answer("У вас нет прав для выполнения этой команды.")
+        return
+
+    # Запрашиваем @username канала
+    await callback.message.answer("Введите @username канала (например, @my_channel):")
+    await state.set_state(AddChannelStates.waiting_for_username)
+
+# Обработка @username канала
+@admin.message(AddChannelStates.waiting_for_username)
+async def process_username(message: types.Message, state: FSMContext):
+    username = message.text.strip()
+
+    # Проверяем, что username начинается с @
+    if not username.startswith('@'):
+        await message.answer("Username канала должен начинаться с @. Попробуйте снова.")
+        return
+
+    # Сохраняем username в состоянии
+    await state.update_data(channel_username=username)
+
+    # Запрашиваем имя канала
+    await message.answer("Введите имя канала (например, My Channel):")
+    await state.set_state(AddChannelStates.waiting_for_name)
+
+
+# Обработка имени канала
+@admin.message(AddChannelStates.waiting_for_name)
+async def process_name(message: types.Message, state: FSMContext):
+    channel_name = message.text.strip()
+
+    # Получаем сохранённый username из состояния
+    data = await state.get_data()
+    channel_username = data.get('channel_username')
+
+    try:
+        # Добавляем канал в базу данных (замените на ваш метод)
+        await DB.add_chanell_op(channel_username, channel_name)
+
+        await message.answer(f"Канал {channel_name} (@{channel_username}) успешно добавлен в ОП.")
+    except Exception as e:
+        await message.answer(f"Ошибка: {e}")
+    finally:
+        # Завершаем состояние
+        await state.clear()
+
+@admin.callback_query(F.data.startswith('channel:'))
+async def process_channel_button(callback_query: types.CallbackQuery):
+    channel_id = callback_query.data.split(':')[1]
+    print(channel_id)
+    channel_info = await DB.get_channel_info(channel_id)
+
+    if not channel_info:
+        await callback_query.answer("Канал не найден.")
+        return
+
+    channel_id, channel_name, channel_username = channel_info
+
+    keyboard = InlineKeyboardBuilder()
+    keyboard.add(InlineKeyboardButton(text="Изменить имя", callback_data=f"update_name:{channel_id}"))
+    keyboard.add(InlineKeyboardButton(text="Изменить username", callback_data=f"update_username:{channel_id}"))
+    keyboard.add(InlineKeyboardButton(text="Удалить", callback_data=f"opdelete:{channel_id}"))
+    keyboard.adjust(1)
+    await callback_query.message.answer(
+        f"Информация о канале:\n\nID: {channel_id}\nИмя: {channel_name}\nUsername: {channel_username}",
+        reply_markup=keyboard.as_markup()
+    )
+    await callback_query.answer()
+
+@admin.callback_query(F.data.startswith('update_name:'))
+async def edit_channel_name(callback_query: types.CallbackQuery, state: FSMContext):
+    channel_id = callback_query.data.split(':')[1]
+    await state.update_data(channel_id=channel_id)
+    await callback_query.message.answer("Введите новое имя канала:")
+    await state.set_state(EditChannelStates.waiting_for_name)
+
+@admin.callback_query(F.data.startswith('update_username:'))
+async def edit_channel_username(callback_query: types.CallbackQuery, state: FSMContext):
+    channel_name = callback_query.data.split(':')[1]
+    await state.update_data(channel_name=channel_name)
+    await callback_query.message.answer("Введите новый @username канала:")
+    await state.set_state(EditChannelStates.waiting_for_username)
+
+@admin.message(EditChannelStates.waiting_for_name)
+async def process_new_name(message: types.Message, state: FSMContext):
+    new_name = message.text.strip()
+    data = await state.get_data()
+    channel_id = data['channel_id']
+
+    await DB.update_channel_name(channel_id, new_name)
+    await message.answer("Имя канала успешно обновлено.", reply_markup=admin_kb())
+    await state.clear()
+
+@admin.message(EditChannelStates.waiting_for_username)
+async def process_new_username(message: types.Message, state: FSMContext):
+    new_username = message.text.strip()
+    data = await state.get_data()
+    channel_name = data['channel_name']
+
+    if not new_username.startswith('@'):
+        await message.answer("Username канала должен начинаться с @. Попробуйте снова.")
+        return
+
+    await DB.update_channel_username(channel_name, new_username)
+    await message.answer("Username канала успешно обновлен.")
+    await state.clear()
+
+@admin.callback_query(F.data.startswith('opdelete:'))
+async def delete_channel(callback_query: types.CallbackQuery):
+    channel_id = callback_query.data.split(':')[1]
+    print(channel_id)
+    await DB.delete_channel(channel_id)
+    await callback_query.message.answer("Канал успешно удален.")
+    await callback_query.answer()

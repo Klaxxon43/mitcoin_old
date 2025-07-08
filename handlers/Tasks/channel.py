@@ -164,7 +164,7 @@ async def handle_channel_selection(message: types.Message, state: FSMContext, bo
     # ✅ Всё хорошо — создаём задание
     await DB.add_balance(user_id, -price)
     await DB.add_transaction(user_id=user_id, amount=price, description="создание задания на подписки", additional_info=None)
-    await DB.add_task(user_id=user_id, target_id=chat_id, amount=amount, task_type=1)
+    task_id = await DB.add_task(user_id=user_id, target_id=chat_id, amount=amount, task_type=1)
 
     await message.answer(
         f"✅ Задание на канал <b>{chat.title}</b> создано успешно!",
@@ -173,16 +173,26 @@ async def handle_channel_selection(message: types.Message, state: FSMContext, bo
         ])
     )
 
-    await bot.send_message(TASKS_CHAT_ID, f'''
+    bot_username = (await bot.get_me()).username
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🎯 Выполнить задание", 
+            url=f"https://t.me/{bot_username}?start=channel_{task_id}"
+        )]
+    ])
+
+    await bot.send_message(
+        TASKS_CHAT_ID,
+        f'''
 🔔 СОЗДАНО НОВОЕ ЗАДАНИЕ 🔔
 ⭕️ Тип задания: 📢 Канал
 💬 Канал: {chat.title}
 💸 Цена: {price // amount}
 👥 Кол-во выполнений: {amount}
 💰 Стоимость: {price}
-''')
-
-    await state.clear()
+    ''',
+        reply_markup=keyboard
+    )
 
 @tasks.callback_query(F.data == "check_admin_rights")
 async def check_admin_rights(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
@@ -209,7 +219,7 @@ async def check_admin_rights(callback: types.CallbackQuery, state: FSMContext, b
         # ✅ Всё ок — создаём задание
         await DB.add_balance(user_id, -price)
         await DB.add_transaction(user_id=user_id, amount=price, description="создание задания на подписки", additional_info=None)
-        await DB.add_task(user_id=user_id, target_id=chat_id, amount=amount, task_type=1)
+        task_id = await DB.add_task(user_id=user_id, target_id=chat_id, amount=amount, task_type=1)
 
         await callback.message.edit_text(
             f"✅ Задание на канал <b>{chat.title}</b> создано успешно!",
@@ -218,16 +228,26 @@ async def check_admin_rights(callback: types.CallbackQuery, state: FSMContext, b
             ])
         )
 
-        await bot.send_message(TASKS_CHAT_ID, f'''
-🔔 СОЗДАНО НОВОЕ ЗАДАНИЕ 🔔
-⭕️ Тип задания: 📢 Канал
-💬 Канал: {chat.title}
-💸 Цена: {price // amount}
-👥 Кол-во выполнений: {amount}
-💰 Стоимость: {price}
-''')
+        bot_username = (await bot.get_me()).username
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="🎯 Выполнить задание", 
+                url=f"https://t.me/{bot_username}?start=channel_{task_id}"
+            )]
+        ])
 
-        await state.clear()
+        await bot.send_message(
+            TASKS_CHAT_ID,
+            f'''
+        🔔 СОЗДАНО НОВОЕ ЗАДАНИЕ 🔔
+        ⭕️ Тип задания: 📢 Канал
+        💬 Канал: {chat.title}
+        💸 Цена: {price // amount}
+        👥 Кол-во выполнений: {amount}
+        💰 Стоимость: {price}
+        ''',
+            reply_markup=keyboard
+        )
 
     except Exception as e:
         print("Ошибка в check_admin_rights:", e)
@@ -265,6 +285,7 @@ async def pr_chat2(message: types.Message, state: FSMContext):
                                  reply_markup=pr_menu_canc())
     except ValueError:
         await message.answer('<b>Ошибка ввода</b>\nПопробуй ввести целое число...', reply_markup=pr_menu_canc())
+
 @tasks.message(ChannelPromotionStates.awaiting_post_message)
 async def pr_post4(message: types.Message, state: FSMContext, bot: Bot):
     async with task_creation_lock:  # Устанавливаем блокировку
@@ -430,7 +451,6 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
 
     except Exception as e:
         print(f"Ошибка в task_detail_handler: {e}")
-
 @tasks.callback_query(F.data.startswith('chanelcheck_'))
 async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
     await callback.answer()
@@ -447,8 +467,8 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
 
     # Проверяем подписку на канал
     try: 
-        bot_member = await bot.get_chat_member(target_id, user_id)
-        if bot_member.status not in ["member", "administrator", "creator"]:
+        chat_member = await bot.get_chat_member(target_id, user_id)
+        if chat_member.status not in ["member", "administrator", "creator"]:
             builder = InlineKeyboardBuilder()
             builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_chanel"))
             builder.add(InlineKeyboardButton(text="Проверить 🔄️", callback_data=f"chanelcheck_{task_id}"))
@@ -467,56 +487,43 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
         return
 
     if not await DB.is_task_completed(user_id, task[0]):
-        # Обновляем задание
-        await DB.update_task_amount(task_id)
+        # Уменьшаем количество выполнений на 1
+        new_amount = task[3] - 1
+        await DB.update_task_amount(task_id, new_amount)
+        
         await DB.add_completed_task(user_id, task_id, target_id, 1500, task[1], status=1)
         await DB.add_balance(amount=1500, user_id=user_id)
 
         # Проверяем нужно ли удалить задание
-        updated_task = await DB.get_task_by_id(task_id)
-        if updated_task[3] == 0:
-            delete_task = await DB.get_task_by_id(task_id)
-            creator_id = delete_task[1]
+        if new_amount <= 0:
+            creator_id = task[1]
             await DB.delete_task(task_id)
-            await bot.send_message(creator_id, "🎉 Одно из ваших заданий было успешно выполнено",
-                                 reply_markup=back_menu_kb(creator_id))
+            await bot.send_message(
+                creator_id, 
+                "🎉 Одно из ваших заданий было успешно выполнено",
+                reply_markup=back_menu_kb(creator_id)
+            )
 
         await DB.increment_statistics(1, 'all_subs_chanel')
         await DB.increment_statistics(2, 'all_subs_chanel')
         await DB.increment_statistics(1, 'all_taasks')
         await DB.increment_statistics(2, 'all_taasks')
         await update_dayly_and_weekly_tasks_statics(user_id)
-        await callback.message.edit_text("✅")
-        await callback.answer("+1500")
-        await asyncio.sleep(2)
-    else:
-        await callback.message.edit_text("‼ Вы уже выполнили это задание", reply_markup=back_menu_kb(user_id))
-        await callback.answer("Задание уже выполнено")
-        await asyncio.sleep(3)
-        return
-
-    # Обновляем список заданий
-    from handlers.client.client import get_available_tasks, task_cache
-    all_tasks = task_cache.get('all_tasks', [])
-    tasks = [task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])]
-
-    if tasks:
-        random.shuffle(tasks)
-        chanelpage = 1
         
-        current_time = int(time.time())
-        random.shuffle(tasks)
-        keyboard = await generate_tasks_keyboard_chanel(tasks, bot, current_time)
-        
+        # Показываем уведомление об успешном выполнении
+        builder = InlineKeyboardBuilder()
+        builder.add(InlineKeyboardButton(
+            text="Дальше ⏭️", 
+            callback_data="work_chanel"
+        ))
         await callback.message.edit_text(
-            "📢 <b>Задания на каналы:</b>\n\n🎢 Каналы в списке располагаются по количеству необходимых подписчиков\n\n⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-            reply_markup=keyboard
+            "✅ Задание успешно выполнено! +1500 MITcoin",
+            reply_markup=builder.as_markup()
         )
     else:
         await callback.message.edit_text(
-            "На данный момент доступных заданий нет, возвращайся позже 😉",
-            reply_markup=back_work_menu_kb(user_id)
-        )
+            "‼ Вы уже выполнили это задание", 
+            reply_markup=back_menu_kb(user_id))
 
 async def check_admin_and_get_invite_link_chanel(bot: Bot, target_id: int):
     try:

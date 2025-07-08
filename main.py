@@ -6,14 +6,14 @@ from aiogram.enums.parse_mode import ParseMode
 from config import *
 from handlers.client.client import router
 from handlers.Admin.admin import admin
-from handlers.promo import pr
+from handlers.client.promo import pr
 from datebase.db import DB
 from datebase.db_create import DB as DB_CREATE
 from aiogram.client.default import DefaultBotProperties
 from other.casino import casino
 from handlers.inline_query import iq
 from handlers.buyStars import BuyStars
-from handlers.mining import mining
+from handlers.client.mining import mining
 from handlers.bots import bots, pytz
 from datetime import datetime, timedelta
 from aiocryptopay import AioCryptoPay, Networks

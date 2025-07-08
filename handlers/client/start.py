@@ -13,6 +13,26 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
         contest_id = int(args[1].split('_')[1])
         await handle_contest_participation(message, bot, contest_id, user_id, username)
         return
+    if args[1].startswith('channel_'):
+        task_id = int(args[1].split('_')[1])
+        # Перенаправляем пользователя на выполнение задания канала
+        await handle_channel_task(message, bot, task_id)
+        return
+    elif args[1].startswith('chat_'):
+        task_id = int(args[1].split('_')[1])
+        # Перенаправляем пользователя на выполнение задания чата
+        await handle_chat_task(message, bot, task_id)
+        return
+    elif args[1].startswith('comment_'):
+        task_id = int(args[1].split('_')[1])
+        # Перенаправляем пользователя на выполнение задания комментария
+        await handle_comment_task(message, bot, task_id)
+        return
+    elif args[1].startswith('boost_'):
+        task_id = int(args[1].split('_')[1])
+        # Перенаправляем пользователя на выполнение задания буста
+        await handle_boost_task(message, bot, task_id)
+        return
     
     # 2. Проверка подписки на обязательные каналы
     not_subscribed = await check_channel_subscriptions(user_id, bot)
@@ -374,7 +394,7 @@ async def handle_check_creator_referral(user_id: int, username: str, bot: Bot, c
         await DB.add_star(user_id, 1)
         await DB.record_referral_earnings(referrer_id=creator_id, referred_user_id=user_id, amount=mit_reward)
         
-        await send_message_safe(bot, creator_id,
+        await bot.send_message(creator_id,
                             f"👤 <a href='t.me/{username}'>Пользователь</a> c ID {user_id} перешел по вашему чеку и стал вашим рефералом.\n\n"
                             f"💸 Вам начислено {mit_reward} MitCoin и 1⭐️ за привлечение нового пользователя."
                             f"{' 🎉 Вы пригласили премиум-пользователя!' if is_premium else ''}",
@@ -389,7 +409,7 @@ async def handle_regular_referral(user_id: int, username: str, bot: Bot, referre
     await DB.add_star(user_id, 1)
     await DB.record_referral_earnings(referrer_id=referrer_id, referred_user_id=user_id, amount=mit_reward)
     
-    await send_message_safe(bot, referrer_id,
+    await bot.send_message(referrer_id,
                         f"👤 <a href='t.me/{username}'>Пользователь</a> c ID {user_id} перешел по вашему чеку и стал вашим рефералом.\n\n"
                         f"💸 Вам начислено {mit_reward} MitCoin и 1⭐️ за привлечение нового пользователя."
                         f"{' 🎉 Вы пригласили премиум-пользователя!' if is_premium else ''}",
@@ -404,7 +424,7 @@ async def handle_check_referral_registration(user_id: int, username: str, bot: B
     await DB.add_star(user_id, 1)
     await DB.record_referral_earnings(referrer_id=ref_user_id, referred_user_id=user_id, amount=mit_reward)
     
-    await send_message_safe(bot, ref_user_id,
+    await bot.send_message(ref_user_id,
                         f"👤 <a href='t.me/{username}'>Пользователь</a> c ID {user_id} перешел по вашему чеку и стал вашим рефералом.\n\n"
                         f"💸 Вам начислено {mit_reward} MitCoin и 1⭐️ за привлечение нового пользователя."
                         f"{' 🎉 Вы пригласили премиум-пользователя!' if is_premium else ''}",
@@ -474,20 +494,16 @@ async def handle_check_referral(message: types.Message, bot: Bot, check_uid: str
     )
     
     # Сообщение рефереру
-    await send_message_safe(
-        bot,
-        ref_user_id,
-        f"💸 <b>Пользователь c ID {user_id} активировал ваш реферальный чек!</b>\n\n"
-        f"💰 <b>Вам начислено {referral_amount} MitCoin за активацию чека.</b>"
-        f"{' 🎉 Вы пригласили премиум-пользователя!' if is_premium else ''}",
-        reply_markup=back_menu_kb(user_id)
-    )
+    await bot.send_message(ref_user_id,
+            f"💸 <b>Пользователь c ID {user_id} активировал ваш реферальный чек!</b>\n\n"
+            f"💰 <b>Вам начислено {referral_amount} MitCoin за активацию чека.</b>"
+            f"{' 🎉 Вы пригласили премиум-пользователя!' if is_premium else ''}",
+            reply_markup=back_menu_kb(user_id)
+        )
     
     # Уведомление создателю чека при исчерпании фонда
     if ref_fund - 1 == 0:
-        await send_message_safe(
-            bot,
-            creator_id,
+        await bot.send_message(creator_id,
             f"⚠️ <b>Реферальный фонд для чека {check_uid} закончился.</b>\n\n"
             f"💵 Вы можете пополнить реферальный фонд, чтобы продолжить привлекать пользователей.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -574,10 +590,10 @@ async def handle_check_activation(message: types.Message, bot: Bot, check_uid: s
     if ref_user_id and ref_bonus:
         referral_amount = (check_sum * ref_bonus) // 100
         await DB.add_balance(ref_user_id, referral_amount)
-        await send_message_safe(bot, ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
+        await bot.send_message(ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
     
     # Уведомление создателю чека
-    await send_message_safe(bot, creator_id, f"💸 Ваш чек на {check_sum} MitCoin был активирован пользователем {usname}.")
+        await bot.send_message(creator_id, f"💸 Ваш чек на {check_sum} MitCoin был активирован пользователем {usname}.")
     
     # Создание реферальной ссылки (для мульти-чеков)
     if check_type == 2 and ref_bonus and not ref_user_id:
@@ -640,10 +656,10 @@ async def handle_check_password(message: types.Message, state: FSMContext, bot: 
             referral_bonus = ref_bonus  # Получаем процент реферала из столбца ref_bonus
             referral_amount = (check_sum * referral_bonus) // 100
             await DB.add_balance(ref_user_id, referral_amount)
-            await send_message_safe(bot, ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
+            await bot.send_message(ref_user_id, f"💸 Вы получили {referral_amount} MitCoin за реферальную активацию чека.")
 
-            # Уведомление создателю чека
-            await send_message_safe(bot, user_id, f"💸 Ваш чек на {check[4]} MitCoin был активирован пользователем {usname}.")
+                # Уведомление создателю чека
+            await bot.send_message(user_id, f"💸 Ваш чек на {check[4]} MitCoin был активирован пользователем {usname}.")
 
             # Создаем реферальную ссылку для текущего пользователя
             bot_username = (await bot.get_me()).username
@@ -659,3 +675,244 @@ async def handle_check_password(message: types.Message, state: FSMContext, bot: 
     else:
         await message.answer("❌ <b>Неверный пароль</b>", reply_markup=back_menu_kb(user_id))
         return 
+
+
+async def handle_channel_task(message: types.Message, bot: Bot, task_id: int):
+    user_id = message.from_user.id
+    
+    # Проверяем подписки на обязательные каналы
+    not_subscribed = await check_channel_subscriptions(user_id, bot)
+    if not_subscribed:
+        await handle_not_subscribed(message, not_subscribed)
+        return
+    
+    # Получаем задание из БД
+    task = await DB.get_task_by_id(task_id)
+    if not task:
+        await message.answer("❌ Задание не найдено или уже выполнено", reply_markup=back_menu_kb(user_id))
+        return
+    
+    # Проверяем, не выполнял ли пользователь это задание ранее
+    if await DB.is_task_completed(user_id, task_id):
+        await message.answer("ℹ Вы уже выполнили это задание", reply_markup=back_menu_kb(user_id))
+        return
+    
+    target_id = task[2]
+    
+    try:
+        # Получаем информацию о канале
+        chat = await bot.get_chat(target_id)
+        from handlers.Tasks.channel import check_admin_and_get_invite_link_chanel
+        invite_link = await check_admin_and_get_invite_link_chanel(bot, target_id)
+        
+        # Создаем клавиатуру для выполнения задания
+        builder = InlineKeyboardBuilder()
+        builder.add(InlineKeyboardButton(
+            text="Проверить подписку 🔄", 
+            callback_data=f"chanelcheck_{task_id}"
+        ))
+        builder.add(InlineKeyboardButton(
+            text="Перейти в канал", 
+            url=invite_link
+        ))
+        builder.add(InlineKeyboardButton(
+            text="⏭ Пропустить", 
+            callback_data=f"skip_task_{task_id}"
+        ))
+        builder.adjust(1, 2)
+        
+        # Отправляем пользователю задание
+        await message.answer(
+            f"📢 <b>Задание:</b> Подписаться на канал {chat.title}\n\n"
+            f"💸 Награда: 1500 MITcoin\n\n"
+            f"1. Нажмите кнопку <b>Перейти в канал</b>\n"
+            f"2. Подпишитесь на канал\n"
+            f"3. Вернитесь и нажмите <b>Проверить подписку</b>",
+            reply_markup=builder.as_markup()
+        )
+        
+    except Exception as e:
+        print(f"Ошибка при обработке задания канала: {e}")
+        await message.answer(
+            "❌ Произошла ошибка при загрузке задания. Попробуйте позже.",
+            reply_markup=back_menu_kb(user_id)
+        )
+
+async def handle_chat_task(message: types.Message, bot: Bot, task_id: int):
+    user_id = message.from_user.id
+    
+    # Проверяем подписки
+    not_subscribed = await check_channel_subscriptions(user_id, bot)
+    if not_subscribed:
+        await handle_not_subscribed(message, not_subscribed)
+        return
+    
+    task = await DB.get_task_by_id(task_id)
+    if not task:
+        await message.answer("❌ Задание не найдено или уже выполнено", reply_markup=back_menu_kb(user_id))
+        return
+    
+    if await DB.is_task_completed(user_id, task_id):
+        await message.answer("ℹ Вы уже выполнили это задание", reply_markup=back_menu_kb(user_id))
+        return
+    
+    target_id = task[2]
+    
+    try:
+        chat = await bot.get_chat(target_id)
+        from handlers.Tasks.chat import check_admin_and_get_invite_link_chat
+        invite_link = await check_admin_and_get_invite_link_chat(bot, target_id)
+        
+        builder = InlineKeyboardBuilder()
+        builder.add(InlineKeyboardButton(
+            text="Проверить вступление 🔄", 
+            callback_data=f"chatcheck_{task_id}"
+        ))
+        builder.add(InlineKeyboardButton(
+            text="Перейти в чат", 
+            url=invite_link
+        ))
+        builder.add(InlineKeyboardButton(
+            text="⏭ Пропустить", 
+            callback_data=f"skip_task_{task_id}"
+        ))
+        builder.adjust(1, 2)
+        
+        await message.answer(
+            f"💬 <b>Задание:</b> Вступить в чат {chat.title}\n\n"
+            f"💸 Награда: 1500 MITcoin\n\n"
+            f"1. Нажмите кнопку <b>Перейти в чат</b>\n"
+            f"2. Вступите в чат\n"
+            f"3. Вернитесь и нажмите <b>Проверить вступление</b>\n\n"
+            f"⚠ Не покидайте чат в течение 7 дней!",
+            reply_markup=builder.as_markup()
+        )
+        
+    except Exception as e:
+        print(f"Ошибка при обработке задания чата: {e}")
+        await message.answer(
+            "❌ Произошла ошибка при загрузке задания. Попробуйте позже.",
+            reply_markup=back_menu_kb(user_id)
+        )
+
+async def handle_comment_task(message: types.Message, bot: Bot, task_id: int):
+    user_id = message.from_user.id
+    
+    not_subscribed = await check_channel_subscriptions(user_id, bot)
+    if not_subscribed:
+        await handle_not_subscribed(message, not_subscribed)
+        return
+    
+    task = await DB.get_task_by_id(task_id)
+    if not task:
+        await message.answer("❌ Задание не найдено или уже выполнено", reply_markup=back_menu_kb(user_id))
+        return
+    
+    if await DB.is_task_completed(user_id, task_id):
+        await message.answer("ℹ Вы уже выполнили это задание", reply_markup=back_menu_kb(user_id))
+        return
+    
+    target_id = task[2]
+    chat_id, message_id = map(int, target_id.split(":"))
+    
+    try:
+        # Пересылаем пост пользователю
+        await bot.forward_message(
+            chat_id=user_id,
+            from_chat_id=chat_id,
+            message_id=message_id
+        )
+        
+        builder = InlineKeyboardBuilder()
+        builder.add(InlineKeyboardButton(
+            text="Проверить комментарий ✅", 
+            callback_data=f"comment_{task_id}"
+        ))
+        builder.add(InlineKeyboardButton(
+            text="✋ Ручная проверка", 
+            callback_data=f"2comment_{task_id}"
+        ))
+        builder.add(InlineKeyboardButton(
+            text="⏭ Пропустить", 
+            callback_data=f"skip_task_{task_id}"
+        ))
+        builder.adjust(1, 2)
+        
+        await message.answer(
+            "💬 <b>Задание:</b> Написать комментарий под постом\n\n"
+            f"💸 Награда: {all_price['comment']} MITcoin\n\n"
+            "1. Напишите осмысленный комментарий под пересланным постом\n"
+            "2. Нажмите кнопку <b>Проверить комментарий</b>\n\n"
+            "⚠ Комментарий должен быть текстовым и соответствовать теме поста",
+            reply_markup=builder.as_markup()
+        )
+        
+    except Exception as e:
+        print(f"Ошибка при обработке задания комментария: {e}")
+        await message.answer(
+            "❌ Не удалось загрузить пост для комментирования",
+            reply_markup=back_menu_kb(user_id)
+        )
+
+async def handle_boost_task(message: types.Message, bot: Bot, task_id: int):
+    user_id = message.from_user.id
+    
+    # Проверка на премиум
+    if not message.from_user.is_premium and user_id not in ADMINS_ID:
+        await message.answer(
+            "⚠ Для выполнения заданий на буст требуется Telegram Premium",
+            reply_markup=back_menu_kb(user_id)
+        )
+        return
+    
+    not_subscribed = await check_channel_subscriptions(user_id, bot)
+    if not_subscribed:
+        await handle_not_subscribed(message, not_subscribed)
+        return
+    
+    task = await DB.get_task_by_id(task_id)
+    if not task:
+        await message.answer("❌ Задание не найдено или уже выполнено", reply_markup=back_menu_kb(user_id))
+        return
+    
+    if await DB.is_task_completed(user_id, task_id):
+        await message.answer("ℹ Вы уже выполнили это задание", reply_markup=back_menu_kb(user_id))
+        return
+    
+    target_id = task[2]
+    days = task[6]  # Количество дней буста
+    
+    try:
+        chat = await bot.get_chat(target_id)
+        
+        builder = InlineKeyboardBuilder()
+        builder.add(InlineKeyboardButton(
+            text="🚀 Забустить", 
+            url=f'https://t.me/boost/{chat.username}'
+        ))
+        builder.add(InlineKeyboardButton(
+            text="Проверить ✅", 
+            callback_data=f"checkboost_{task_id}"
+        ))
+        builder.add(InlineKeyboardButton(
+            text="✋ Ручная проверка", 
+            callback_data=f"2checkboost_{task_id}"
+        ))
+        builder.adjust(1, 2)
+        
+        await message.answer(
+            f"📢 <b>Задание:</b> Буст канала {chat.title}\n\n"
+            f"💸 Награда: {all_price['boost']} MITcoin\n"
+            f"⏳ Срок буста: {days} дней\n\n"
+            "1. Нажмите кнопку <b>Забустить</b>\n"
+            "2. Выполните буст канала\n"
+            "3. Нажмите <b>Проверить</b> для подтверждения",
+            reply_markup=builder.as_markup()
+        )
+        
+    except Exception as e:
+        print(f"Ошибка при обработке задания буста: {e}")
+        await message.answer(
+            "❌ Произошла ошибка при загрузке задания. Попробуйте позже.",
+            reply_markup=back_menu_kb(user_id)
+        )

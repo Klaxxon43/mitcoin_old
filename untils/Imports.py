@@ -4,7 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from aiocryptopay import AioCryptoPay, Networks
 from cachetools import TTLCache
-from typing import Union
+from typing import Union, Dict, List, Any
+
 
 # Aiogram основные компоненты
 from aiogram import Bot, F, types, Router, Dispatcher
@@ -29,7 +30,7 @@ from aiogram.types import (
 )
 
 # Локальные модули
-from datebase.db import DB, Promo, Contest, Boost, BackgroundTasks as BG
+from datebase.db import DB, Promo, Contest, Boost
 from untils.kb import (
     menu_kb, back_menu_kb, profile_kb, pr_menu_kb,
     pr_menu_canc, work_menu_kb, back_work_menu_kb,

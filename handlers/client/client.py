@@ -17,6 +17,7 @@ router = Router()
 
 task_cache = {}
 task_cache_chat = {}
+task_count_cache = {}
 
 # Назначим текстовые представления для типов заданий
 TASK_TYPES = {
@@ -29,76 +30,11 @@ TASK_TYPES = {
     7: '❤️ Реакция'
 }
 
-
-
-@router.message(Command('premsbrosss'))
-async def prem_sbros_command(message: types.Message):
-    """
-    Обработчик команды /prem_sbros.
-    """
-    try:
-        # Вызываем функцию для массового обновления
-        await DB.reset_all_premium()
-        await message.answer("Все пользователи обновлены: premium = False.")
-    except Exception as e:
-        await message.answer(f"Произошла ошибка: {e}")
-
-
-# Регистрируем обработчик команды
-def register_handlers(dp: Dispatcher):
-    dp.register_message_handler(prem_sbros_command, commands=["prem_sbros"])
-    
-async def send_message_safe(bot: Bot, chat_id: int, text: str, reply_markup=None):
-    try:
-        await bot.get_chat(chat_id)  # Проверяем, существует ли чат
-        await bot.send_message(chat_id, text, reply_markup=reply_markup)
-    except Exception as e: 
-        print(f"Ошибка при отправке сообщения: {e}")
-
-
-
-
-
-
-
-
-
-
 @router.callback_query(F.data == 'profile')
 async def profile_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-
-    # Проверяем, подписан ли пользователь на все каналы
-    channels = await DB.all_channels_op()
-    not_subscribed = []
-
-    for channel in channels:
-        channel_id = channel[0]
-        try:
-            chat_member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            if chat_member.status not in ['member', 'administrator', 'creator']:
-                not_subscribed.append(channel)
-        except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
-
-    if not_subscribed:
-        print(f'https://t.me/{channel[0].replace("@", "")}')
-        # Если пользователь не подписан на некоторые каналы
-        keyboard = InlineKeyboardBuilder()
-        for channel in not_subscribed:
-            keyboard.add(InlineKeyboardButton(
-                text=f"📢 {channel[1]}",
-                url=f"https://t.me/{channel[0].replace('@', '')}"
-            ))
-        keyboard.add(InlineKeyboardButton(
-            text="✅ Я подписался", 
-            callback_data="op_proverka"
-        ))
-        keyboard.adjust(1)
-        await callback.message.answer(
-            "Для использования бота подпишитесь на следующие каналы:",
-            reply_markup=keyboard.as_markup()
-        )
+    if not await check_subs_op(user_id, bot):
+        return
     else:
 
         user_id = callback.from_user.id
@@ -168,38 +104,8 @@ async def cancel_all(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
 @router.callback_query(F.data == 'menu_stats')
 async def stats_menu_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-
-    # Проверяем, подписан ли пользователь на все каналы
-    channels = await DB.all_channels_op()
-    not_subscribed = []
-
-    for channel in channels:
-        channel_id = channel[0]
-        try:
-            chat_member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            if chat_member.status not in ['member', 'administrator', 'creator']:
-                not_subscribed.append(channel)
-        except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
-
-    if not_subscribed:
-        print(f'https://t.me/{channel[0].replace("@", "")}')
-        # Если пользователь не подписан на некоторые каналы
-        keyboard = InlineKeyboardBuilder()
-        for channel in not_subscribed:
-            keyboard.add(InlineKeyboardButton(
-                text=f"📢 {channel[1]}",
-                url=f"https://t.me/{channel[0].replace('@', '')}"
-            ))
-        keyboard.add(InlineKeyboardButton(
-            text="✅ Я подписался",
-            callback_data="op_proverka"
-        ))
-        keyboard.adjust(1)
-        await callback.message.answer(
-            "Для использования бота подпишитесь на следующие каналы:",
-            reply_markup=keyboard.as_markup()
-        )
+    if not await check_subs_op(user_id, bot):
+        return
     else:
 
         user_count = len(await DB.select_all())
@@ -279,38 +185,8 @@ async def stats_menu_handler(callback: types.CallbackQuery, bot: Bot):
 @router.callback_query(F.data == 'support')
 async def refki_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-
-    # Проверяем, подписан ли пользователь на все каналы
-    channels = await DB.all_channels_op()
-    not_subscribed = []
-
-    for channel in channels:
-        channel_id = channel[0]
-        try:
-            chat_member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            if chat_member.status not in ['member', 'administrator', 'creator']:
-                not_subscribed.append(channel)
-        except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
-
-    if not_subscribed:
-        print(f'https://t.me/{channel[0].replace("@", "")}')
-        # Если пользователь не подписан на некоторые каналы
-        keyboard = InlineKeyboardBuilder()
-        for channel in not_subscribed:
-            keyboard.add(InlineKeyboardButton(
-                text=f"📢 {channel[1]}",
-                url=f"https://t.me/{channel[0].replace('@', '')}"
-            ))
-        keyboard.add(InlineKeyboardButton(
-            text="✅ Я подписался",
-            callback_data="op_proverka"
-        ))
-        keyboard.adjust(1)
-        await callback.message.answer(
-            "Для использования бота подпишитесь на следующие каналы:",
-            reply_markup=keyboard.as_markup()
-        )
+    if not await check_subs_op(user_id, bot):
+        return
     else:
         await callback.answer()
         roadmap = "https://telegra.ph/Dorozhnaya-karta-proekta-Mit-Coin--Mit-Coin-Project-Roadmap-11-25"
@@ -349,38 +225,8 @@ async def refki_handler(callback: types.CallbackQuery):
 @router.callback_query(F.data == 'op_help_menu')
 async def refki_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-
-    # Проверяем, подписан ли пользователь на все каналы
-    channels = await DB.all_channels_op()
-    not_subscribed = []
-
-    for channel in channels:
-        channel_id = channel[0]
-        try:
-            chat_member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            if chat_member.status not in ['member', 'administrator', 'creator']:
-                not_subscribed.append(channel)
-        except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
-
-    if not_subscribed:
-        print(f'https://t.me/{channel[0].replace("@", "")}')
-        # Если пользователь не подписан на некоторые каналы
-        keyboard = InlineKeyboardBuilder()
-        for channel in not_subscribed:
-            keyboard.add(InlineKeyboardButton(
-                text=f"📢 {channel[1]}",
-                url=f"https://t.me/{channel[0].replace('@', '')}"
-            ))
-        keyboard.add(InlineKeyboardButton(
-            text="✅ Я подписался",
-            callback_data="op_proverka"
-        ))
-        keyboard.adjust(1)
-        await callback.message.answer(
-            "Для использования бота подпишитесь на следующие каналы:",
-            reply_markup=keyboard.as_markup()
-        )
+    if not await check_subs_op(user_id, bot):
+        return
     else:
 
         await callback.answer()
@@ -401,38 +247,8 @@ async def refki_handler(callback: types.CallbackQuery, bot: Bot):
 @router.callback_query(F.data == 'bonus_menu')
 async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     user_id = callback.from_user.id
-
-    # Проверяем, подписан ли пользователь на все каналы
-    channels = await DB.all_channels_op()
-    not_subscribed = []
-
-    for channel in channels:
-        channel_id = channel[0]
-        try:
-            chat_member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            if chat_member.status not in ['member', 'administrator', 'creator']:
-                not_subscribed.append(channel)
-        except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
-
-    if not_subscribed:
-        print(f'https://t.me/{channel[0].replace("@", "")}')
-        # Если пользователь не подписан на некоторые каналы
-        keyboard = InlineKeyboardBuilder()
-        for channel in not_subscribed:
-            keyboard.add(InlineKeyboardButton(
-                text=f"📢 {channel[1]}",
-                url=f"https://t.me/{channel[0].replace('@', '')}"
-            ))
-        keyboard.add(InlineKeyboardButton(
-            text="✅ Я подписался",
-            callback_data="op_proverka"
-        ))
-        keyboard.adjust(1)
-        await callback.message.answer(
-            "Для использования бота подпишитесь на следующие каналы:",
-            reply_markup=keyboard.as_markup()
-        )
+    if not await check_subs_op(user_id, bot):
+        return
     else:
         await callback.answer()
         user_id = callback.from_user.id
@@ -737,59 +553,36 @@ async def outputrubmenu11(message: types.Message, state: FSMContext):
 
 
 
-
-@router.callback_query(F.data == 'corvertation')
-async def corvertation_handler(callback: types.CallbackQuery, bot: Bot):
+@router.callback_query(F.data == 'corvertation')  # <-- исправлено название
+async def convertation_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
 
-    # Проверяем, подписан ли пользователь на все каналы
-    channels = await DB.all_channels_op()
-    not_subscribed = []
+    if not await check_subs_op(user_id, bot):
+        return
 
-    for channel in channels:
-        channel_id = channel[0]
-        try:
-            chat_member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            if chat_member.status not in ['member', 'administrator', 'creator']:
-                not_subscribed.append(channel)
-        except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
+    # Проверка конвертации
+    last_conversion_date = await DB.get_last_conversion_date(user_id)
+    print(last_conversion_date)
+    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
 
-    if not_subscribed:
-        print(f'https://t.me/{channel[0].replace("@", "")}')
-        # Если пользователь не подписан на некоторые каналы
-        keyboard = InlineKeyboardBuilder()
-        for channel in not_subscribed:
-            keyboard.add(InlineKeyboardButton(
-                text=f"📢 {channel[1]}",
-                url=f"https://t.me/{channel[0].replace('@', '')}"
-            ))
-        keyboard.add(InlineKeyboardButton(
-            text="✅ Я подписался",
-            callback_data="op_proverka"
-        ))
-        keyboard.adjust(1)
-        await callback.message.answer(
-            "Для использования бота подпишитесь на следующие каналы:",
-            reply_markup=keyboard.as_markup()
+    if last_conversion_date == today:
+        await callback.message.edit_text(
+            "❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\n"
+            "Попробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>",
+            reply_markup=back_profile_kb()
         )
-    else:
-        await callback.answer()
-        user_id = callback.from_user.id
-        last_conversion_date = await DB.get_last_conversion_date(user_id)
-        today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-        if last_conversion_date == today:
-            await callback.message.edit_text("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_profile_kb())
-            return
-        add_button1 = InlineKeyboardButton(text="Продолжить!", callback_data='mittorub')
-        add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='profile')
-        # Создаем клавиатуру и добавляем в нее кнопку
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button2]])
-        await callback.message.edit_text('''
-    🌀 <b>Вы можете конвертировать ваши $MICO в рубли!</b>
+        return
 
-    <i>Конвертацию можно проводить не более 1 раза в день и не более чем на 1% от баланса</i>
-        ''', reply_markup=keyboard)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Продолжить!", callback_data='mittorub')],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')],
+    ])
+    await callback.message.edit_text(
+        "🌀 <b>Вы можете конвертировать ваши $MICO в рубли!</b>\n\n"
+        "<i>Конвертацию можно проводить не более 1 раза в день и не более чем на 1% от баланса</i>",
+        reply_markup=keyboard
+    )
+
 
 @router.callback_query(F.data == 'mittorub')
 async def corvertation_rubtomit_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -1283,75 +1076,104 @@ ID того, кто пригласил: <code>{referrer_id}</code>\n
 async def works_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
 
-    # Проверяем, подписан ли пользователь на все каналы
-    channels = await DB.all_channels_op()
-    not_subscribed = []
-
-    for channel in channels:
-        channel_id = channel[0]
-        try:
-            chat_member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            if chat_member.status not in ['member', 'administrator', 'creator']:
-                not_subscribed.append(channel)
-        except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
-
-    if not_subscribed:
-        # Если пользователь не подписан на некоторые каналы
-        keyboard = InlineKeyboardBuilder()
-        for channel in not_subscribed:
-            keyboard.add(InlineKeyboardButton(
-                text=f"📢 {channel[1]}",
-                url=f"https://t.me/{channel[0].replace('@', '')}"
-            ))
-        keyboard.add(InlineKeyboardButton(
-            text="✅ Я подписался",
-            callback_data="op_proverka"
-        ))
-        keyboard.adjust(1)
-        await callback.message.answer(
-            "Для использования бота подпишитесь на следующие каналы:",
-            reply_markup=keyboard.as_markup()
-        )
-    else:
-        await callback.answer()
-        
-        # Получаем отфильтрованные задания с информацией для каждого типа
-        available_chanel_tasks = await get_filtered_tasks_with_info(1, bot, user_id)
-        available_chat_tasks = await get_filtered_tasks_with_info(2, bot, user_id)
-        available_post_tasks = await get_filtered_tasks_with_info(3, bot, user_id)
-        available_comment_tasks = await get_filtered_tasks_with_info(4, bot, user_id)
-        available_link_tasks = await get_filtered_tasks_with_info(5, bot, user_id)
-        available_reaction_tasks = await get_filtered_tasks_with_info(7, bot, user_id)
-        available_boost_tasks = await get_filtered_tasks_with_info(6, bot, user_id)
-
-        total_count = await DB.calculate_total_cost()
-
-        await callback.message.edit_text(f'''
-💰 Вы можете заработать - <b>{total_count} $MICO</b>
+    if not await check_subs_op(user_id, bot):
+        return
+    
+    await callback.answer()
+    
+    # Сначала отправляем сообщение без данных о заданиях
+    temp_message = await callback.message.edit_text(
+        '''
+💰 Вы можете заработать - <b>загрузка...</b>
 
 <b>Заданий на:</b>
-📣 Каналы - {len(available_chanel_tasks)} 
-👥 Чаты - {len(available_chat_tasks)}         
-👀 Посты - {len(available_post_tasks)}
-💬 Комментарии - {len(available_comment_tasks)}
-❤️ Реакции - {len(available_reaction_tasks)} 
-🔗 Переходы в бота - {len(available_link_tasks)}
-🚀 Бусты - {len(available_boost_tasks)}
-
+📣 Каналы - загрузка... 
+👥 Чаты - загрузка...         
+👀 Посты - загрузка...
+💬 Комментарии - загрузка...
+❤️ Реакции - загрузка... 
+🔗 Переходы в бота - загрузка...
+🚀 Бусты - загрузка...
 
 🚨 <em>Запрещено покидать канал/чат ранее чем через 7 дней. За нарушение вы можете получить блокировку заработка или штраф!</em>
 
 <b>Выберите способ заработка</b> 👇    
-        ''', reply_markup=work_menu_kb(user_id))
+        ''',
+        reply_markup=work_menu_kb(user_id)
+    )
+    
+    # Проверяем кэш
+    cache_key = f"tasks_{user_id}"
+    if cache_key in task_count_cache:
+        cached_data = task_count_cache[cache_key]
+        await update_message_with_data(temp_message, cached_data, user_id)
+        return
+    
+    # Если в кэше нет, загружаем данные
+    (
+        available_chanel_tasks,
+        available_chat_tasks,
+        available_post_tasks,
+        available_comment_tasks,
+        available_link_tasks,
+        available_reaction_tasks,
+        available_boost_tasks,
+        total_count
+    ) = await asyncio.gather(
+        get_filtered_tasks_with_info(1, bot, user_id),
+        get_filtered_tasks_with_info(2, bot, user_id),
+        get_filtered_tasks_with_info(3, bot, user_id),
+        get_filtered_tasks_with_info(4, bot, user_id),
+        get_filtered_tasks_with_info(5, bot, user_id),
+        get_filtered_tasks_with_info(7, bot, user_id),
+        get_filtered_tasks_with_info(6, bot, user_id),
+        DB.calculate_total_cost()
+    )
+    
+    # Формируем данные для кэша
+    data = {
+        'chanel': len(available_chanel_tasks),
+        'chat': len(available_chat_tasks),
+        'post': len(available_post_tasks),
+        'comment': len(available_comment_tasks),
+        'link': len(available_link_tasks),
+        'reaction': len(available_reaction_tasks),
+        'boost': len(available_boost_tasks),
+        'total': total_count
+    }
+    
+    # Сохраняем в кэш
+    task_count_cache[cache_key] = data
+    
+    # Обновляем сообщение с актуальными данными
+    await update_message_with_data(temp_message, data, user_id)
 
+async def update_message_with_data(message, data, user_id):
+    await message.edit_text(
+        f'''
+💰 Вы можете заработать - <b>{data['total']} $MICO</b>
+
+<b>Заданий на:</b>
+📣 Каналы - {data['chanel']} 
+👥 Чаты - {data['chat']}         
+👀 Посты - {data['post']}
+💬 Комментарии - {data['comment']}
+❤️ Реакции - {data['reaction']} 
+🔗 Переходы в бота - {data['link']}
+🚀 Бусты - {data['boost']}
+
+🚨 <em>Запрещено покидать канал/чат ранее чем через 7 дней. За нарушение вы можете получить блокировку заработка или штраф!</em>
+
+<b>Выберите способ заработка</b> 👇    
+        ''',
+        reply_markup=work_menu_kb(user_id)
+    )
 
 async def get_filtered_tasks_with_info(task_type, bot, user_id):
     tasks = await DB.select_tasks_by_type(task_type)
     filtered_tasks = []
     
     for task in tasks:
-        # Основные проверки
         if (await DB.is_task_completed(user_id, task[0]) or
             await DB.is_task_failed(user_id, task[0]) or
             await DB.is_task_pending(user_id, task[0])):
@@ -1364,35 +1186,25 @@ async def get_filtered_tasks_with_info(task_type, bot, user_id):
             'amount': task[3],
             'type': task[4],
             'other': task[6],
-            'valid': True  # Флаг валидности задания
+            'valid': True
         }
         
-        # Дополнительные проверки доступности
         try:
-            if task_type in [1, 2]:  # Для каналов и чатов
+            if task_type in [1, 2]:
                 try:
                     chat = await bot.get_chat(task[2])
                     task_info['title'] = chat.title
                     task_info['username'] = getattr(chat, 'username', None)
                     task_info['invite_link'] = getattr(chat, 'invite_link', None)
                 except Exception as e:
-                    print(f"Чат/канал {task[2]} недоступен: {e}")
                     task_info['valid'] = False
         except Exception as e:
-            print(f"Ошибка при проверке задания {task[0]}: {e}")
             task_info['valid'] = False
         
         if task_info['valid']:
             filtered_tasks.append(task_info)
     
     return filtered_tasks
-
-        
-# Создаем кэш для задач (хранится 1 минут)
-task_cache = TTLCache(maxsize=100000, ttl=600)
-task_cache_chat = TTLCache(maxsize=100000, ttl=480)
-
-
 
 
 
@@ -1866,38 +1678,8 @@ async def increment_daily_statistics(column):
 @router.message(Command('opp'))
 async def start(message: types.Message, bot: Bot):
     user_id = message.from_user.id
-
-    # Проверяем, подписан ли пользователь на все каналы
-    channels = await DB.all_channels_op()
-    not_subscribed = []
-
-    for channel in channels:
-        print(channel_id)
-        channel_id = channel[0]
-        try:
-            chat_member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            if chat_member.status not in ['member', 'administrator', 'creator']:
-                not_subscribed.append(channel)
-        except Exception as e:
-            print(f"Ошибка при проверке подписки: {e} \n\n {channel} \n\n {channel_id}")
-
-    if not_subscribed:
-        # Если пользователь не подписан на некоторые каналы
-        keyboard = InlineKeyboardBuilder()
-        for channel in not_subscribed:
-            keyboard.add(InlineKeyboardButton(
-                text=f"📢 {channel[1]}",
-                url=f"https://t.me/{channel[1].replace('@', '')}"
-            ))
-        keyboard.add(InlineKeyboardButton(
-            text="✅ Я подписался",
-            callback_data="op_proverka"
-        ))
-        keyboard.adjust(1)
-        await message.answer(
-            "Для использования бота подпишитесь на следующие каналы:",
-            reply_markup=keyboard.as_markup()
-        )
+    if not await check_subs_op(user_id, bot):
+        return
     else:
         # Если пользователь подписан на все каналы
         await message.answer("Добро пожаловать! Вы подписаны на все каналы.")
@@ -1932,7 +1714,42 @@ async def check_subscription(callback_query: types.CallbackQuery, bot: Bot):
 
 
 
+async def check_subs_op(user_id, bot: Bot):
 
+    # Проверяем, подписан ли пользователь на все каналы
+    channels = await DB.all_channels_op()
+    not_subscribed = []
+
+    for channel in channels:
+        channel_id = channel[0]
+        try:
+            chat_member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
+            if chat_member.status not in ['member', 'administrator', 'creator']:
+                not_subscribed.append(channel)
+        except Exception as e:
+            print(f"Ошибка при проверке подписки: {e}")
+
+    if not_subscribed:
+        print(f'https://t.me/{channel[0].replace("@", "")}')
+        # Если пользователь не подписан на некоторые каналы
+        keyboard = InlineKeyboardBuilder()
+        for channel in not_subscribed:
+            keyboard.add(InlineKeyboardButton(
+                text=f"📢 {channel[1]}",
+                url=f"https://t.me/{channel[0].replace('@', '')}"
+            ))
+        keyboard.add(InlineKeyboardButton(
+            text="✅ Я подписался",
+            callback_data="op_proverka"
+        ))
+        keyboard.adjust(1)
+        await bot.send_message(
+            user_id,
+            "Для использования бота подпишитесь на следующие каналы:",
+            reply_markup=keyboard.as_markup()
+        )
+        return False
+    return True
 
 
 
@@ -2209,11 +2026,11 @@ async def check_subscription(callback_query: types.CallbackQuery, bot: Bot):
 
 
 
-# # url = "http://45.143.203.232/get_balance"
-# # data = {"user_id": 5129878568}
+# url = "http://45.143.203.232/get_balance"
+# data = {"user_id": 5129878568}
 
-# # response = requests.post(url, json=data)
-# # print(response.json())  
+# response = requests.post(url, json=data)
+# print(response.json())  
 
 
 

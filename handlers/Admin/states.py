@@ -63,3 +63,11 @@ class CreateContest(StatesGroup):
     contest_text = State()
     conditions = State()
     channel_sub_input = State()
+
+class EditChannelStates(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_username = State()
+
+class AddChannelStates(StatesGroup):
+    waiting_for_username = State()
+    waiting_for_name = State()

@@ -190,13 +190,12 @@ class DataBase:
 
 
     async def get_last_bonus_date(self, user_id: int) -> str:
-        connection = await self.connect()  # Явно ожидаем результат корутины
-        async with connection.execute(
+        async with self.con.execute(
                 "SELECT last_bonus_date FROM bonus_time WHERE user_id = ?",
                 (user_id,),
         ) as cursor:
             row = await cursor.fetchone()
-            return row["last_bonus_date"] if row else None
+            return row[0] if row else None
 
     async def update_last_bonus_date(self, user_id: int):
         """Обновить дату последней конвертации."""
@@ -441,14 +440,15 @@ class DataBase:
             ''', (user_id, today))
             await self.con.commit()
 
-    async def get_last_conversion_date(self, user_id: int) -> str:
-        connection = await self.connect()  # Явно ожидаем результат корутины
-        async with connection.execute(
-                "SELECT last_conversion_date FROM conversions WHERE user_id = ?",
-                (user_id,),
+    async def get_last_conversion_date(self, user_id: int):
+        """Получает дату последней конвертации пользователя"""
+        async with self.con.execute(
+            "SELECT last_conversion_date FROM conversions WHERE user_id = ?", 
+            (user_id,)
         ) as cursor:
             row = await cursor.fetchone()
-            return row["last_conversion_date"] if row else None
+            print(row)
+            return row[0] if row else None  # Обращаемся по индексу, а не по ключу
 
 
     # ВЫВОД
@@ -781,25 +781,27 @@ class DataBase:
     # ЗАДАЧИ
 
     async def add_task(self, user_id, target_id, amount, task_type, other=None):
-        """Метод для добавления новой задачи с инкрементом task_id"""
+        """
+        Добавляет новую задачу в таблицу tasks с инкрементом task_id вручную.
+        Возвращает: task_id новой задачи.
+        """
         async with self.con.cursor() as cur:
+            # Получаем максимальный task_id
             await cur.execute('SELECT MAX(task_id) FROM tasks')
-            max_task_id_result = await cur.fetchone()
+            result = await cur.fetchone()
 
-            # Извлекаем максимальный task_id из результата
-            max_task_id = max_task_id_result[0] if max_task_id_result else None
+            max_task_id = result[0] if result and result[0] is not None else 0
+            new_task_id = max_task_id + 1
 
-            # Если записей в таблице нет, начнем с task_id = 1
-            new_task_id = 1 if max_task_id is None else max_task_id + 1 
-
-            # Вставляем новую задачу с инкрементированным task_id и временем создания
+            # Вставляем новую задачу
             await cur.execute('''
                 INSERT INTO tasks (task_id, user_id, target_id, amount, type, max_amount, other, time)
                 VALUES (?, ?, ?, ?, ?, ?, ?, datetime(CURRENT_TIMESTAMP, '+3 hours'))
             ''', (new_task_id, user_id, target_id, amount, task_type, amount, other))
 
-            # Сохраняем изменения в базе данных
             await self.con.commit()
+            return new_task_id
+
 
 
     # async def add_user(self, user_id, username):
@@ -1088,10 +1090,9 @@ class DataBase:
     # РУБ БАЛАНС
 
     async def get_user_rub_balance(self, user_id):
-        connection = await self.connect()  # Явно ожидаем результат корутины
-        async with connection.execute('SELECT rub_balance FROM users WHERE user_id = ?', (user_id,)) as cursor:
+        async with self.con.execute('SELECT rub_balance FROM users WHERE user_id = ?', (user_id,)) as cursor:
             row = await cursor.fetchone()
-            return row['rub_balance'] if row else 0  # Возвращаем баланс или 0, если записи нет
+            return row[0] if row else 0  # Возвращаем баланс или 0, если записи нет
 
     async def add_rub_balance(self, user_id, amount):
         async with self.con.cursor() as cur:
@@ -2529,7 +2530,16 @@ class DataBase:
             result = await cur.fetchone()
             return result[0] or 0
 
-
+    async def get_filtered_tasks(self, task_type: int, user_id: int):
+        """Возвращает задания определенного типа, исключая уже выполненные пользователем"""
+        query = '''
+            SELECT * FROM tasks 
+            WHERE type = ? AND id NOT IN (
+                SELECT task_id FROM completed_tasks 
+                WHERE user_id = ? AND status = 1
+            )
+        '''
+        return await self.con.execute(query, (task_type, user_id))
 
 
 
@@ -2767,14 +2777,11 @@ class Boost():
         """Добавляет запись о бусте пользователя канала"""
         async with DB.con.cursor() as cur:
             await cur.execute('''
-                CREATE TABLE IF NOT EXISTS user_boosts (
-                    user_id INTEGER,
-                    chat_id INTEGER,
-                    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            await cur.execute('''
-                INSERT INTO user_boosts (user_id, chat_id) VALUES (?, ?)
+                INSERT INTO user_boosts (user_id, chat_id, reward_given) 
+                VALUES (?, ?, FALSE)
+                ON CONFLICT(user_id, chat_id) DO UPDATE SET 
+                    date = CURRENT_TIMESTAMP,
+                    reward_given = FALSE
             ''', (user_id, chat_id))
         await DB.con.commit()
 
@@ -2793,6 +2800,28 @@ class Boost():
         async with DB.con.cursor() as cur:
             await cur.execute('''
                 SELECT 1 FROM user_boosts WHERE user_id = ? AND chat_id = ?
+            ''', (user_id, chat_id))
+            result = await cur.fetchone()
+            return result is not None
+        
+    @staticmethod    
+    async def mark_boost_reward_given(user_id: int, chat_id: int):
+        """Помечает, что награда за буст выдана"""
+        async with DB.con.cursor() as cur:
+            await cur.execute('''
+                UPDATE user_boosts 
+                SET reward_given = TRUE
+                WHERE user_id = ? AND chat_id = ?
+            ''', (user_id, chat_id))
+        await DB.con.commit()
+
+    @staticmethod
+    async def has_user_boosted_without_reward(user_id: int, chat_id: int) -> bool:
+        """Проверяет, есть ли неотмеченный буст пользователя этого канала"""
+        async with DB.con.cursor() as cur:
+            await cur.execute('''
+                SELECT 1 FROM user_boosts 
+                WHERE user_id = ? AND chat_id = ? AND reward_given = FALSE
             ''', (user_id, chat_id))
             result = await cur.fetchone()
             return result is not None
@@ -2901,6 +2930,5 @@ class Boost():
             ''', (task_id,))
             return await cur.fetchall()
         
-class BackgroundTasks: pass
 
 DB = DataBase()

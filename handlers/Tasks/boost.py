@@ -284,36 +284,25 @@ async def retry_boost_task(callback: types.CallbackQuery, state: FSMContext):
 
 
 
-
-
 @tasks.callback_query(F.data == 'work_boost')
 async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     user = await DB.select_user(user_id)
-    # premium = user['prem']
     
-    # if not premium:
-    #     await callback.message.answer(
-    #         '❌ У тебя нету Telegram Premium! \n😞 Без него ты не сможешь выполнять задания этого типа\n🌟 Возвращайся, когда будет premium'
-    #     )
-    #     return
-
     if not callback.from_user.is_premium and user_id not in ADMINS_ID:
         kb = InlineKeyboardBuilder()
         kb.button(text='🔙 Назад', callback_data='work_menu')
         await callback.message.edit_text('Чтобы выполнять задания этого типа, требуется <b>TG Premium</b>', reply_markup=kb.as_markup())
         return 
 
-    # Получаем все задания на буст
-    all_tasks = await DB.select_boost_tasks()  # Предположим, что у вас есть такая функция
+    all_tasks = await DB.select_boost_tasks()
 
     if all_tasks:
-        # Фильтруем задания, исключая выполненные, проваленные и находящиеся на проверке
         available_tasks = [
             task for task in all_tasks
-            if not await DB.is_task_completed(user_id, task[0])  # Исключаем выполненные
-            and not await DB.is_task_failed(user_id, task[0])  # Исключаем проваленные
-            and not await DB.is_task_pending(user_id, task[0])  # Исключаем задания на проверке
+            if not await DB.is_task_completed(user_id, task[0])
+            and not await DB.is_task_failed(user_id, task[0])
+            and not await DB.is_task_pending(user_id, task[0])
         ]
         
         if not available_tasks:
@@ -323,7 +312,6 @@ async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
             )
             return
         
-        # Выбираем случайное задание из списка доступных
         random_task = random.choice(available_tasks)
         task_id, target_id, days = random_task[0], random_task[2], random_task[6]
         
@@ -332,8 +320,16 @@ async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
                 'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE'
             )
             
+            # Получаем информацию о канале
+            chat = await get_chat_info(bot, target_id)
+            if not chat:
+                await callback.message.answer("❌ Не удалось получить информацию о канале")
+                return
+                
+            channel_name = chat.title if hasattr(chat, 'title') else target_id
+            
             builder = InlineKeyboardBuilder()
-            builder.add(InlineKeyboardButton(text="🚀 Забустить", url=f'https://t.me/boost/{str(target_id).replace("@", "")}'))
+            builder.add(InlineKeyboardButton(text="🚀 Забустить", url=f'https://t.me/boost/{chat.username}'))
             builder.add(InlineKeyboardButton(text="Проверить ✅", callback_data=f"checkboost_{task_id}"))
             builder.add(InlineKeyboardButton(text="✋Ручная проверка", callback_data=f"2checkboost_{task_id}"))
             builder.add(InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}"))
@@ -342,7 +338,7 @@ async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
             builder.adjust(1, 2, 2, 1)
             
             await callback.message.answer(
-                f"📢 Буст канала: {target_id}\n💸 Цена: {all_price['boost']} $MICO\nСрок: {days} день\n\n"
+                f"📢 Буст канала: {channel_name}\n💸 Цена: {all_price['boost']} $MICO\nСрок: {days} день\n\n"
                 "Нажмите кнопку <b>Проверить</b>, чтобы подтвердить выполнение задания.",
                 reply_markup=builder.as_markup()
             )
@@ -352,12 +348,6 @@ async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
                 "Произошла ошибка при обработке задания. Попробуйте позже.",
                 reply_markup=back_work_menu_kb(user_id)
             )
-    else:
-        await callback.message.edit_text(
-            "На данный момент заданий на буст нет, возвращайся позже 😉",
-            reply_markup=back_work_menu_kb(user_id)
-        )
-
 
 @tasks.callback_query(F.data.startswith('checkboost_'))
 async def check_boost_handler(callback: types.CallbackQuery, bot: Bot):
@@ -368,53 +358,73 @@ async def check_boost_handler(callback: types.CallbackQuery, bot: Bot):
         await callback.answer("Задание не найдено.")
         return
 
-    target_id = task[2]  # username канала (например, 'mychannel')
-    try:
-        target_chat = await bot.get_chat(f"@{target_id}")
-    except:
-        target_chat = await bot.get_chat(target_id)
-    target_chat_id = target_chat.id
-
-    # ✅ Проверка: есть ли запись о бусте в БД
-    boost_detected = await Boost.has_user_boosted(user_id, target_chat_id)
+    target_id = task[2]
+    chat = await get_chat_info(bot, target_id)
+    if not chat:
+        await callback.answer("❌ Не удалось получить информацию о канале")
+        return
+    
+    target_chat_id = chat.id
+    boost_detected = await Boost.has_user_boosted_without_reward(user_id, target_chat_id)
 
     if boost_detected:
-        await DB.increment_statistics(1, 'boosts')
-        await DB.increment_statistics(2, 'boosts')
-        await DB.increment_statistics(1, 'all_taasks')
-        await DB.increment_statistics(2, 'all_taasks') 
-        await callback.message.answer(
-            f"👍 <b>Буст засчитан! +{all_price['boost']} MITcoin</b>\n\nНажмите кнопку для перехода к следующему заданию.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Дальше ⏭️", callback_data="work_boost")]]
+        await Boost.mark_boost_reward_given(user_id, target_chat_id)
+        
+        # Первое начисление (сразу)
+        first_payment = all_price['boost']
+        await DB.add_balance(amount=first_payment, user_id=user_id)
+        
+        # Создаем запись о выполненном задании
+        await DB.add_completed_task(
+            user_id=user_id,
+            task_id=task_id,
+            target_id=target_id,
+            task_sum=first_payment,
+            owner_id=task[1],
+            status=1,
+            other=task[6]
+        )
+        
+        # Уменьшаем количество выполнений
+        new_amount = task[3] - 1
+        await DB.update_task_amount(task_id, new_amount)
+        
+        # Если остались дни для ежедневных начислений
+        if task[6] > 1:
+            await DB.add_bg_task(
+                task_type='boost_check',
+                task_data={
+                    'task_id': task_id,
+                    'user_id': user_id,
+                    'chat_id': target_chat_id,
+                    'days_checked': 1,  # Уже сделали первое начисление
+                    'total_days': task[6]
+                },
+                delay_seconds=86400*2  # Ровно 24 часа до следующего начисления
             )
+        
+        await callback.message.answer(
+            f"👍 <b>Буст засчитан! +{first_payment} MITcoin</b>\n\n"
+            f"Следующее начисление за второй день буста будет через 48 часов, после завершения второго дня буста, далее спустя каждые 24 часа" + 
+            (f"\nВсего дней буста: {task[6]}" if task[6] > 1 else ""),
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Дальше ⏭️", callback_data="work_boost")]
+            ])
         )
-        await DB.add_bg_task(
-            task_type='boost_check',
-            task_data={
-                'task_id': task_id,
-                'user_id': user_id,
-                'chat_id': target_chat_id,
-                'days_checked': 0,
-                'total_days': task[6]
-            },
-            delay_seconds=1,
-            original_id=task_id
-        )
-        await DB.update_task_amount(task_id)
-        updated_task = await DB.get_task_by_id(task_id)
-        await DB.add_completed_task(user_id, task_id, target_id, all_price['boost'], task[1], status=1, other=task[6])
-        await DB.add_balance(amount=all_price['boost'], user_id=user_id)
-        await update_dayly_and_weekly_tasks_statics(user_id)
-        if updated_task[3] == 0:
-            delete_task = await DB.get_task_by_id(task_id)
-            creator_id = delete_task[1]
+        
+        if new_amount <= 0:
+            creator_id = task[1]
             await DB.delete_task(task_id)
-            await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на буст было успешно выполнено!",
-                                   reply_markup=back_menu_kb(user_id))
+            await bot.send_message(
+                creator_id,
+                f"🎉 Ваше задание на буст было успешно выполнено!",
+                reply_markup=back_menu_kb(user_id)
+            )
     else:
-        await callback.answer("❌ Буст не был выполнен. Попробуйте ещё раз.", show_alert=True)
-
+        await callback.answer(
+            "❌ Буст не был выполнен или уже был засчитан. Попробуйте ещё раз.", 
+            show_alert=True
+        )
 
 @tasks.callback_query(F.data.startswith('2checkboost_'))
 async def _(callback: types.CallbackQuery, state: FSMContext):
@@ -519,6 +529,15 @@ async def confirm_boost_handler(callback: types.CallbackQuery, bot: Bot, state: 
 
     # Извлекаем данные из кортежа по индексам
     pending_id, user_id, task_id, target_id, _, _, screenshot, status = pending_task
+
+    try:
+        target_chat = await bot.get_chat(f"@{target_id}")
+    except:
+        target_chat = await bot.get_chat(target_id)
+    target_chat_id = target_chat.id
+
+    # Помечаем награду как выданную
+    await Boost.mark_boost_reward_given(user_id, target_chat_id)
 
     # Добавляем задание в таблицу completed_tasks
     await DB.add_completed_task(
@@ -673,24 +692,34 @@ async def on_chat_boost_removed(removed_chat_boost: ChatBoostRemoved, bot: Bot):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+async def get_chat_info(bot: Bot, target_id):
+    """Получает информацию о канале по ID или username"""
+    try:
+        # Если target_id - число (ID канала в формате -100...)
+        if isinstance(target_id, int) or (isinstance(target_id, str) and target_id.lstrip('-').isdigit()):
+            chat_id = int(target_id)
+            chat = await bot.get_chat(chat_id)
+            return chat
+            
+        # Если target_id - строка и начинается с @ (username)
+        elif isinstance(target_id, str) and target_id.startswith('@'):
+            chat = await bot.get_chat(target_id)
+            return chat
+            
+        # Если формат неясен (например, просто строка без @)
+        else:
+            try:
+                # Пробуем как числовой ID
+                chat_id = int(target_id)
+                chat = await bot.get_chat(chat_id)
+                return chat
+            except ValueError:
+                # Пробуем как username (добавляем @ если его нет)
+                username = target_id if target_id.startswith('@') else f'@{target_id}'
+                chat = await bot.get_chat(username)
+                return chat
+                
+    except Exception as e:
+        print(f"Error getting chat info for {target_id}: {e}")
+        return None
 

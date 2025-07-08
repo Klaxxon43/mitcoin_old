@@ -491,7 +491,8 @@ class DataBase:
                 CREATE TABLE IF NOT EXISTS user_boosts (
                     user_id INTEGER,
                     chat_id INTEGER,
-                    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    reward_given BOOLEAN DEFAULT FALSE  -- Новая колонка для отметки о выдаче награды
                 )
             ''')
 
