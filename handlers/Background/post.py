@@ -1,33 +1,31 @@
-from untils.Imports import *
+from utils.Imports import *
+from utils.redis_utils import *
 from datetime import datetime, timedelta
 import asyncio
-
 from .locks import *
 
-async def process_tasks_periodically(bot: Bot):
-    """Обновление постовых заданий с сохранением доступности"""
-    while True:
-        try:
-            all_tasks = await DB.select_post_tasks()
-            random.shuffle(all_tasks)
+async def update_tasks_periodically():
+    """Обновление заданий"""
+    cache_key = "post"  # Заменить на соответствующий ключ для каждого типа
+    
+    try:
+        cached_tasks = await get_cached_data(cache_key)
+        if cached_tasks:
+            with cache_lock:  # Использовать соответствующий lock
+                global available_tasks  # Или processed_tasks, available_reaction_tasks и т.д.
+                available_tasks = cached_tasks
+            return
             
-            new_processed_tasks = []
-            for task in all_tasks:
-                try:
-                    channel_id, post_id = map(int, task[2].split(':'))
-                    await bot.forward_message(chat_id=INFO_ID, from_chat_id=channel_id, message_id=post_id)
-                    new_processed_tasks.append(task)
-                except Exception as e:
-                    print(f"Ошибка при проверке поста {task[2]}: {e}")
-                    continue
+        all_tasks = await DB.select_tasks()  # Соответствующий метод для каждого типа
+        random.shuffle(all_tasks)
+        
+        # Сохраняем в Redis и обновляем глобальную переменную
+        await set_cached_data(cache_key, all_tasks, ttl=600)
+        with cache_lock:
+            available_tasks = all_tasks
+            print(f"Задания обновлены. Доступно: {len(available_tasks)}")
+            
+    except Exception as e:
+        print(f"Ошибка в update_tasks_periodically: {e}")
 
-            with post_cache_lock:
-                global processed_tasks
-                # Сохраняем старые задания, если новые не прошли проверку
-                processed_tasks = new_processed_tasks if new_processed_tasks else processed_tasks
-                print(f"Постовые задания обновлены. Доступно: {len(processed_tasks)}")
-
-        except Exception as e:
-            print(f"Критическая ошибка в process_tasks_periodically: {e}")
-
-        await asyncio.sleep(600)
+    await asyncio.sleep(600)

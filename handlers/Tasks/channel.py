@@ -138,61 +138,77 @@ async def handle_channel_selection(message: types.Message, state: FSMContext, bo
         bot_info = await bot.get_me()
         member = await bot.get_chat_member(chat_id, bot_info.id)
 
-        # 🔒 Бот не админ или не может приглашать
         if member.status != "administrator" or not member.can_invite_users:
             await state.update_data(pending_channel_id=chat_id)
-
             invite_link = f"https://t.me/{bot_info.username}?startchannel&admin=invite_users+manage_chat"
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="➕ Добавить в админы", url=invite_link)],
                 [InlineKeyboardButton(text="🔄 Проверить", callback_data="check_admin_rights")],
                 [InlineKeyboardButton(text="❌ Отмена", callback_data="back_menu")]
             ])
-
             await message.answer(
-                f"😕 Бот найден в канале <b>{chat.title}</b>, но ему <u>не выданы админ-права</u> или <u>он не может приглашать пользователей</u>.\n\n"
-                f"🔧 Пожалуйста, добавьте бота в админы и нажмите <b>Проверить</b>.",
+                f"😕 Бот найден в канале <b>{chat.title}</b>, но ему не выданы админ-права.",
                 reply_markup=keyboard
             )
             return
 
     except Exception as e:
         print("Ошибка при проверке канала:", e)
-        await message.answer("❌ Ошибка при проверке канала. Убедитесь, что бот добавлен в канал с правами администратора.")
+        await message.answer("❌ Ошибка при проверке канала.")
         return
 
-    # ✅ Всё хорошо — создаём задание
+    # Создаем задание
     await DB.add_balance(user_id, -price)
-    await DB.add_transaction(user_id=user_id, amount=price, description="создание задания на подписки", additional_info=None)
-    task_id = await DB.add_task(user_id=user_id, target_id=chat_id, amount=amount, task_type=1)
+    await DB.add_transaction(
+        user_id=user_id,
+        amount=price,
+        description="создание задания на подписки",
+        additional_info=None
+    )
+    
+    task_id = await DB.add_task(
+        user_id=user_id,
+        target_id=chat_id,
+        amount=amount,
+        task_type=1  # Тип задания "канал"
+    )
+
+    # Формируем данные для кэша
+    task_data = {
+        'id': task_id,
+        'user_id': user_id,
+        'target_id': chat_id,
+        'amount': amount,
+        'type': 1,
+        'status': 1,
+        'title': chat.title,
+        'username': getattr(chat, 'username', None),
+        'invite_link': getattr(chat, 'invite_link', None),
+        'is_active': True
+    }
+
+    # Добавляем в кэш и обновляем счетчики
+    await RedisTasksManager.add_new_task_to_cache('channel', task_data)
+    await RedisTasksManager.update_common_tasks_count(bot)
 
     await message.answer(
         f"✅ Задание на канал <b>{chat.title}</b> создано успешно!",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Вернуться в меню", callback_data="back_menu")]
+            [InlineKeyboardButton(text="🔙 Вернуться в меню", callback_data="back_menu")]]
+        ))
+    
+    await bot.send_message(
+        TASKS_CHAT_ID,
+        f"🔔 СОЗДАНО НОВОЕ ЗАДАНИЕ\nТип: 📢 Канал\nКанал: {chat.title}\nЦена: {price//amount}\nВыполнений: {amount}",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="🎯 Выполнить задание", 
+                url=f"https://t.me/{bot_info.username}?start=channel_{task_id}"
+            )]
         ])
     )
 
-    bot_username = (await bot.get_me()).username
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="🎯 Выполнить задание", 
-            url=f"https://t.me/{bot_username}?start=channel_{task_id}"
-        )]
-    ])
-
-    await bot.send_message(
-        TASKS_CHAT_ID,
-        f'''
-🔔 СОЗДАНО НОВОЕ ЗАДАНИЕ 🔔
-⭕️ Тип задания: 📢 Канал
-💬 Канал: {chat.title}
-💸 Цена: {price // amount}
-👥 Кол-во выполнений: {amount}
-💰 Стоимость: {price}
-    ''',
-        reply_markup=keyboard
-    )
+    await state.clear()
 
 @tasks.callback_query(F.data == "check_admin_rights")
 async def check_admin_rights(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
@@ -347,74 +363,123 @@ async def pr_post4(message: types.Message, state: FSMContext, bot: Bot):
                     reply_markup=keyboard)
                 
 semaphore = asyncio.Semaphore(2)  # Ограничение одновременных задач
+
 @tasks.callback_query(F.data.startswith('work_chanel'))
 async def taskss_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-    current_time = int(time.time())
-
+    
     try:
-        from handlers.client.client import get_available_tasks, task_cache
-        all_tasks = task_cache.get('all_tasks', [])
-        print(f'Все задания в кэше - {len(all_tasks)}')
-
-        tasks = await get_available_tasks(user_id, all_tasks)
-        print(f'Доступные задания для пользователя {user_id} - {len(tasks)}')
-
-        if tasks:
-            random.shuffle(tasks)
-            keyboard = await generate_tasks_keyboard_chanel(tasks, bot, current_time)
-
+        # 1. Получаем задания из кэша
+        cached_tasks = await RedisTasksManager.get_cached_tasks('channel')
+        
+        # Если кэш пуст или произошла ошибка, загружаем из БД
+        if not cached_tasks:
+            success = await RedisTasksManager.refresh_task_cache(bot, 'channel')
+            if not success:
+                await callback.answer("Не удалось загрузить задания. Попробуйте позже.", show_alert=True)
+                return
+            
+            cached_tasks = await RedisTasksManager.get_cached_tasks('channel')
+            if not cached_tasks:
+                await callback.message.edit_text(
+                    "На данный момент доступных заданий нет 😢",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
+                return
+        
+        # 2. Фильтруем задания для текущего пользователя
+        available_tasks = []
+        for task in cached_tasks:
             try:
+                if (not await DB.is_task_completed(user_id, task['id']) and
+                    not await DB.is_task_failed(user_id, task['id']) and
+                    not await DB.is_task_pending(user_id, task['id'])):
+                    available_tasks.append(task)
+            except Exception as e:
+                print(f"Error checking task {task.get('id')} for user {user_id}: {e}")
+                continue
+        
+        # 3. Показываем результат пользователю
+        if available_tasks:
+            try:
+                keyboard = await generate_tasks_keyboard_chanel(available_tasks, bot)
                 await callback.message.edit_text(
                     "📢 <b>Задания на каналы:</b>\n\n"
                     "🎢 Каналы в списке располагаются по количеству необходимых подписчиков\n\n"
-                    "⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, в случае нарушения возможен штраф!</i>\n\n"
-                    f"📊 Доступно заданий: {len(tasks)}",
+                    "⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, "
+                    "в случае нарушения возможен штраф!</i>\n\n"
+                    f"📊 Доступно заданий: {len(available_tasks)}",
                     reply_markup=keyboard
                 )
-            except TelegramBadRequest as e:
-                if "message is not modified" in str(e):
-                    await callback.answer("Список заданий актуален")
-                else:
-                    raise
+            except Exception as e:
+                print(f"Error generating keyboard: {e}")
+                await callback.message.edit_text(
+                    "Произошла ошибка при формировании списка заданий",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
         else:
             await callback.message.edit_text(
-                "На данный момент доступных заданий нет, возвращайся позже 😉",
-                reply_markup=back_work_menu_kb(user_id)
-            )
+                "На данный момент доступных заданий нет 😢\n"
+                "Попробуйте позже или проверьте другие типы заданий.",
+                reply_markup=back_work_menu_kb(user_id))
+                
     except Exception as e:
-        print(f"Ошибка в taskss_handler: {e}")
-        markup = InlineKeyboardBuilder()
-        markup.row(InlineKeyboardButton(
-            text='🔄 Обновить',
-            callback_data=f"work_chanel_{current_time}"
-        ))
+        print(f"Critical error in taskss_handler: {e}")
+        await callback.answer("Произошла ошибка. Попробуйте позже.", show_alert=True)
         await callback.message.edit_text(
-            "Произошла ошибка при загрузке заданий. Попробуйте обновить страницу.",
-            reply_markup=markup.as_markup()
+            "⚠️ Не удалось загрузить задания. Пожалуйста, попробуйте позже.",
+            reply_markup=back_work_menu_kb(user_id)
         )
 
-
-async def generate_tasks_keyboard_chanel(tasks, bot, timestamp=None):
+async def generate_tasks_keyboard_chanel(tasks: list, bot: Bot, timestamp: Optional[int] = None) -> InlineKeyboardMarkup:
+    """Генерация клавиатуры с заданиями для каналов"""
     builder = InlineKeyboardBuilder()
     timestamp = timestamp or int(time.time())
 
-    for task in tasks[:5]:
+    for task in tasks[:5]:  # Ограничиваем количество заданий
         try:
-            chat = await bot.get_chat(task[2])
-            button_text = f"{chat.title} | +1500"
-            builder.row(InlineKeyboardButton(
-                text=button_text,
-                callback_data=f"chaneltask_{task[0]}_{timestamp}"
-            ))
+            # Для словарей из Redis
+            if isinstance(task, dict):
+                chat_id = task['target_id']
+                task_id = task['id']
+                title = task.get('title', 'Канал')
+                
+                # Пробуем получить актуальную информацию о чате
+                try:
+                    chat = await bot.get_chat(chat_id)
+                    title = chat.title
+                except:
+                    pass
+                    
+                builder.row(InlineKeyboardButton(
+                    text=f"{title} | +1500",
+                    callback_data=f"chaneltask_{task_id}_{timestamp}"
+                ))
+            
+            # Для кортежей из БД (если вдруг используется старый формат)
+            elif isinstance(task, (tuple, list)) and len(task) >= 3:
+                chat_id = task[2]
+                task_id = task[0]
+                
+                try:
+                    chat = await bot.get_chat(chat_id)
+                    builder.row(InlineKeyboardButton(
+                        text=f"{chat.title} | +1500",
+                        callback_data=f"chaneltask_{task_id}_{timestamp}"
+                    ))
+                except Exception as e:
+                    print(f"Ошибка при получении канала {chat_id}: {e}")
+                    continue
+
         except Exception as e:
-            print(f"Ошибка при получении канала {task[2]}: {e}")
+            print(f"Ошибка обработки задания: {e}")
             continue
 
     builder.row(
         InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"),
         InlineKeyboardButton(text="🔄 Обновить", callback_data=f"work_chanel_{timestamp}")
     )
+    
     return builder.as_markup()
 
 
@@ -451,6 +516,7 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
 
     except Exception as e:
         print(f"Ошибка в task_detail_handler: {e}")
+        
 @tasks.callback_query(F.data.startswith('chanelcheck_'))
 async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
     await callback.answer()
@@ -520,6 +586,7 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
             "✅ Задание успешно выполнено! +1500 MITcoin",
             reply_markup=builder.as_markup()
         )
+        await RedisTasksManager.refresh_task_cache(bot, 'channel')
     else:
         await callback.message.edit_text(
             "‼ Вы уже выполнили это задание", 

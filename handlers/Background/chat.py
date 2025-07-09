@@ -1,4 +1,5 @@
-from untils.Imports import *
+from utils.Imports import *
+from utils.redis_utils import *
 import json
 from datetime import datetime, timedelta
 import asyncio
@@ -21,6 +22,13 @@ async def update_task_cache_for_all_users_chat(bot, DB):
 
 async def get_cached_tasks_chat(bot, DB):
     """Кэшируем задания на чаты с сохранением старых данных"""
+    cache_key = "chat_tasks"
+    cached_tasks = await get_cached_data(cache_key)
+    
+    if cached_tasks:
+        with chat_cache_lock:
+            task_cache_chat['all_tasks'] = cached_tasks
+        return
     
     all_tasks = await DB.select_chat_tasks()
     new_tasks = []
@@ -37,18 +45,13 @@ async def get_cached_tasks_chat(bot, DB):
                         chat_title = "Неизвестный чат"
                     new_tasks.append((*task, chat_title))
             except Exception as e:
-                print(f'Ошибка при обработке чата {task[2]}: {e}')
                 continue
 
     with chat_cache_lock:
         if new_tasks:
-            current_cache = task_cache_chat.get('all_tasks', [])
-            # Объединяем старые и новые задания, удаляя дубликаты по ID
-            updated_cache = list({task[0]: task for task in current_cache + new_tasks}.values())
-            task_cache_chat['all_tasks'] = updated_cache
-            print(f"Кэш чатов обновлен. Заданий: {len(updated_cache)}")
-        else:
-            print("Нет новых заданий для чатов")
+            await set_cached_data(cache_key, new_tasks, ttl=300)
+            task_cache_chat['all_tasks'] = new_tasks
+            print(f"Кэш чатов обновлен. Заданий: {len(new_tasks)}")
 
 
 async def check_admin_and_get_invite_link_chat(bot, target_id):

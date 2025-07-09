@@ -26,7 +26,7 @@ from aiogram.types import (
 
 # Локальные модули
 from datebase.db import DB, Promo
-from untils.kb import (
+from utils.kb import (
     menu_kb, back_menu_kb, profile_kb, pr_menu_kb,
     pr_menu_canc, work_menu_kb, back_work_menu_kb,
     back_profile_kb, select_deposit_menu_kb,

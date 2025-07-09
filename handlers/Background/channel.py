@@ -1,4 +1,5 @@
-from untils.Imports import *
+from utils.Imports import *
+from utils.redis_utils import *
 import json
 from datetime import datetime, timedelta
 import asyncio
@@ -22,31 +23,31 @@ async def update_task_cache_for_all_users(bot, DB):
 async def cache_all_tasks(bot, DB):
     """Кэшируем задания на каналы с сохранением старых данных во время обновления"""
     try:
+        cache_key = "channel_tasks"
+        cached_tasks = await get_cached_data(cache_key)
+        
+        if cached_tasks:
+            with cache_lock:
+                task_cache['all_tasks'] = cached_tasks
+            return
+            
         all_tasks = await DB.select_chanel_tasks()
         new_tasks_with_links = []
-        print(f'Все задания в БД: {len(all_tasks)}')
         
         from handlers.Tasks.channel import semaphore
         async with semaphore:
             for task in all_tasks:
                 try:
                     chat = await bot.get_chat(task[2])
-                    if not chat.invite_link:
-                        print(f"Канал {task[2]} не имеет invite_link, пропускаем")
-                        continue
-                        
-                    if task[3] <= 0:
-                        print(f"Задание {task[0]} имеет amount={task[3]}, пропускаем")
+                    if not chat.invite_link or task[3] <= 0:
                         continue
                         
                     new_tasks_with_links.append((*task, chat.title))
-                    
                 except Exception as e:
-                    print(f'Ошибка при обработке задания {task[0]}: {str(e)}')
                     continue
 
-        # Обновляем кэш
-        from .bg_tasks import cache_lock, task_cache
+        # Сохраняем в Redis и локальный кэш
+        await set_cached_data(cache_key, new_tasks_with_links, ttl=300)
         with cache_lock:
             task_cache['all_tasks'] = new_tasks_with_links
             print(f"Кэш обновлен. Заданий: {len(new_tasks_with_links)}")

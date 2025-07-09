@@ -140,37 +140,32 @@ async def boost_post4(message: types.Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     executions = data.get('executions')
     total_cost = data.get('total_cost')
-    balance = data.get('current_balance')
 
     try:
         chat = await bot.get_chat(chat_id)
         bot_info = await bot.get_me()
         member = await bot.get_chat_member(chat_id, bot_info.id)
 
-        # Проверка прав бота
         if member.status != "administrator" or not member.can_post_messages:
             await state.update_data(pending_channel_id=chat_id)
-
             invite_link = f"https://t.me/{bot_info.username}?startchannel&admin=post_messages+invite_users"
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="➕ Добавить в админы", url=invite_link)],
                 [InlineKeyboardButton(text="🔄 Проверить", callback_data="check_boost_admin_rights")],
                 [InlineKeyboardButton(text="❌ Отмена", callback_data="back_menu")]
             ])
-
             await message.answer(
-                f"😕 Бот найден в канале <b>{chat.title}</b>, но ему <u>не выданы админ-права</u> или <u>он не может публиковать сообщения</u>.\n\n"
-                f"🔧 Пожалуйста, добавьте бота в админы и нажмите <b>Проверить</b>.",
+                f"😕 Бот найден в канале <b>{chat.title}</b>, но ему не выданы админ-права.",
                 reply_markup=keyboard
             )
             return
 
     except Exception as e:
         print("Ошибка при проверке канала:", e)
-        await message.answer("❌ Ошибка при проверке канала. Убедитесь, что бот добавлен в канал с правами администратора.")
+        await message.answer("❌ Ошибка при проверке канала.")
         return
 
-    # Создание задания
+    # Создаем задание
     await DB.add_balance(user_id, -total_cost)
     await DB.add_transaction(
         user_id=user_id,
@@ -178,7 +173,8 @@ async def boost_post4(message: types.Message, state: FSMContext, bot: Bot):
         description="создание задания на буст",
         additional_info=None
     )
-    await DB.add_task(
+    
+    task_id = await DB.add_task(
         user_id=user_id,
         target_id=chat_id,
         amount=executions,
@@ -186,22 +182,35 @@ async def boost_post4(message: types.Message, state: FSMContext, bot: Bot):
         other=data['days']
     )
 
+    # Формируем данные для кэша
+    task_data = {
+        'id': task_id,
+        'user_id': user_id,
+        'target_id': chat_id,
+        'amount': executions,
+        'type': 6,
+        'status': 1,
+        'days': data['days'],
+        'title': chat.title,
+        'username': getattr(chat, 'username', None),
+        'is_active': True
+    }
+
+    # Добавляем в кэш и обновляем счетчики
+    await RedisTasksManager.add_new_task_to_cache('boost', task_data)
+    await RedisTasksManager.update_common_tasks_count(bot)
+
     await message.answer(
-        f"✅ Задание на буст постов в канале <b>{chat.title}</b> создано успешно!\n\n"
-        f"Количество выполнений: {executions}",
+        f"✅ Задание на буст постов в канале <b>{chat.title}</b> создано успешно!",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Вернуться в меню", callback_data="back_menu")]
-        ])
+            [InlineKeyboardButton(text="🔙 Вернуться в меню", callback_data="back_menu")]]
+        )
     )
 
-    await bot.send_message(TASKS_CHAT_ID, f'''
-🔔 СОЗДАНО НОВОЕ ЗАДАНИЕ 🔔
-⭕️ Тип задания: ⭐️ Буст постов
-📢 Канал: {chat.title}
-💸 Цена: {all_price['boost']}
-👥 Кол-во выполнений: {executions}
-💰 Стоимость: {total_cost}
-''')
+    await bot.send_message(
+        TASKS_CHAT_ID,
+        f"🔔 СОЗДАНО НОВОЕ ЗАДАНИЕ\nТип: ⭐️ Буст постов\nКанал: {chat.title}\nЦена: {all_price['boost']}\nВыполнений: {executions}"
+    )
 
     await state.clear()
 
@@ -282,8 +291,6 @@ async def retry_boost_task(callback: types.CallbackQuery, state: FSMContext):
 
 
 
-
-
 @tasks.callback_query(F.data == 'work_boost')
 async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
@@ -295,59 +302,73 @@ async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
         await callback.message.edit_text('Чтобы выполнять задания этого типа, требуется <b>TG Premium</b>', reply_markup=kb.as_markup())
         return 
 
-    all_tasks = await DB.select_boost_tasks()
+    # Пытаемся получить задания из кэша
+    cached_tasks = await RedisTasksManager.get_cached_tasks('boost')
+    
+    if not cached_tasks:
+        # Если в кэше нет, загружаем из БД и кэшируем
+        if await RedisTasksManager.refresh_task_cache(bot):
+            cached_tasks = await RedisTasksManager.get_cached_tasks('boost')
+        else:
+            cached_tasks = []
 
-    if all_tasks:
-        available_tasks = [
-            task for task in all_tasks
-            if not await DB.is_task_completed(user_id, task[0])
-            and not await DB.is_task_failed(user_id, task[0])
-            and not await DB.is_task_pending(user_id, task[0])
-        ]
+    if not cached_tasks:
+        await callback.message.edit_text(
+            "На данный момент доступных заданий на буст нет, возвращайся позже 😉",
+            reply_markup=back_work_menu_kb(user_id)
+        )
+        return
+    
+    # Фильтруем задания, исключая те, которые пользователь уже выполнял
+    available_tasks = [
+        task for task in cached_tasks
+        if not await DB.is_task_completed(user_id, task['id'])
+        and not await DB.is_task_failed(user_id, task['id'])
+        and not await DB.is_task_pending(user_id, task['id'])
+    ]
+    
+    if not available_tasks:
+        await callback.message.edit_text(
+            "На данный момент доступных заданий на буст нет, возвращайся позже 😉",
+            reply_markup=back_work_menu_kb(user_id)
+        )
+        return
+    
+    random_task = random.choice(available_tasks)
+    task_id, target_id, days = random_task['id'], random_task['target_id'], random_task['days']
+    
+    try:
+        await callback.message.answer_sticker(
+            'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE'
+        )
         
-        if not available_tasks:
-            await callback.message.edit_text(
-                "На данный момент доступных заданий на буст нет, возвращайся позже 😉",
-                reply_markup=back_work_menu_kb(user_id)
-            )
-            return
+        # Получаем информацию о канале из кэша
+        channel_name = random_task.get('title', target_id)
+        channel_username = random_task.get('username', None)
         
-        random_task = random.choice(available_tasks)
-        task_id, target_id, days = random_task[0], random_task[2], random_task[6]
+        builder = InlineKeyboardBuilder()
+        if channel_username:
+            builder.add(InlineKeyboardButton(text="🚀 Забустить", url=f'https://t.me/boost/{channel_username}'))
+        else:
+            builder.add(InlineKeyboardButton(text="🚀 Забустить", callback_data="no_username"))
+            
+        builder.add(InlineKeyboardButton(text="Проверить ✅", callback_data=f"checkboost_{task_id}"))
+        builder.add(InlineKeyboardButton(text="✋Ручная проверка", callback_data=f"2checkboost_{task_id}"))
+        builder.add(InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}"))
+        builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_boost_{task_id}"))
+        builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
+        builder.adjust(1, 2, 2, 1)
         
-        try:
-            await callback.message.answer_sticker(
-                'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE'
-            )
-            
-            # Получаем информацию о канале
-            chat = await get_chat_info(bot, target_id)
-            if not chat:
-                await callback.message.answer("❌ Не удалось получить информацию о канале")
-                return
-                
-            channel_name = chat.title if hasattr(chat, 'title') else target_id
-            
-            builder = InlineKeyboardBuilder()
-            builder.add(InlineKeyboardButton(text="🚀 Забустить", url=f'https://t.me/boost/{chat.username}'))
-            builder.add(InlineKeyboardButton(text="Проверить ✅", callback_data=f"checkboost_{task_id}"))
-            builder.add(InlineKeyboardButton(text="✋Ручная проверка", callback_data=f"2checkboost_{task_id}"))
-            builder.add(InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}"))
-            builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_boost_{task_id}"))
-            builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
-            builder.adjust(1, 2, 2, 1)
-            
-            await callback.message.answer(
-                f"📢 Буст канала: {channel_name}\n💸 Цена: {all_price['boost']} $MICO\nСрок: {days} день\n\n"
-                "Нажмите кнопку <b>Проверить</b>, чтобы подтвердить выполнение задания.",
-                reply_markup=builder.as_markup()
-            )
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            await callback.message.edit_text(
-                "Произошла ошибка при обработке задания. Попробуйте позже.",
-                reply_markup=back_work_menu_kb(user_id)
-            )
+        await callback.message.answer(
+            f"📢 Буст канала: {channel_name}\n💸 Цена: {all_price['boost']} $MICO\nСрок: {days} день\n\n"
+            "Нажмите кнопку <b>Проверить</b>, чтобы подтвердить выполнение задания.",
+            reply_markup=builder.as_markup()
+        )
+    except Exception as e:
+        print(f"Ошибка: {e}")
+        await callback.message.edit_text(
+            "Произошла ошибка при обработке задания. Попробуйте позже.",
+            reply_markup=back_work_menu_kb(user_id))
 
 @tasks.callback_query(F.data.startswith('checkboost_'))
 async def check_boost_handler(callback: types.CallbackQuery, bot: Bot):
@@ -411,7 +432,7 @@ async def check_boost_handler(callback: types.CallbackQuery, bot: Bot):
                 [InlineKeyboardButton(text="Дальше ⏭️", callback_data="work_boost")]
             ])
         )
-        
+        RedisTasksManager.refresh_task_cache(bot)
         if new_amount <= 0:
             creator_id = task[1]
             await DB.delete_task(task_id)
@@ -594,6 +615,7 @@ async def confirm_boost_handler(callback: types.CallbackQuery, bot: Bot, state: 
     await DB.increment_statistics(2, 'all_taasks')
 
     await callback.answer("✅ Задание подтверждено.")
+    RedisTasksManager.refresh_task_cache(bot)
 
 @tasks.callback_query(F.data.startswith('reject_boost_'))
 async def reject_boost_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):

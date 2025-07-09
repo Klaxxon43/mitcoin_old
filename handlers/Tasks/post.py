@@ -111,6 +111,10 @@ async def pr_post4(message: types.Message, state: FSMContext, bot: Bot):
 💰 Стоимость: {amount * 600} 
 ''')
                 await state.clear()
+                # После создания задания
+                await RedisTasksManager.refresh_task_cache(bot, "post")
+                await RedisTasksManager.update_common_tasks_count(bot)
+
             except:
                 bot_username = (await bot.get_me()).username
                 invite_link = f"http://t.me/{bot_username}?startchannel&admin=invite_users+manage_chat"
@@ -121,172 +125,252 @@ async def pr_post4(message: types.Message, state: FSMContext, bot: Bot):
                     '😶 Добавьте бота в канал с правами админа при помощи кнопки снизу и перешлите пост заново...',
                     reply_markup=keyboard)
                 
-@tasks.callback_query(F.data == 'work_post')
-async def works_post_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
-    user_id = callback.from_user.id
-    from handlers.client.client import processed_tasks
 
-    # Проверяем, есть ли активное задание для пользователя
-    if user_id in active_tasks:
-        await callback.answer("Вы уже выполняете задание. Дождитесь его завершения.", show_alert=True)
-        return
-
-    if processed_tasks:
-        # Фильтруем задания, которые пользователь еще не выполнил
-        available_tasks = [task for task in processed_tasks if not await DB.is_task_completed(user_id, task[0])]
-
-        if not available_tasks:
-            await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
-                                             reply_markup=back_work_menu_kb(user_id))
-            return
-
-        # Выбираем первое доступное задание
-        task = available_tasks[0]
-        task_id, target_id, amount = task[0], task[2], task[3]
-        chat_id, message_id = map(int, target_id.split(":"))
-
-        # Сохраняем активное задание для пользователя
-        active_tasks[user_id] = task_id
-
-        try:
-            builder = InlineKeyboardBuilder()
-            builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
-            builder.add(InlineKeyboardButton(text="Дальше ⏭️", callback_data=f"work_post"))
-            builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"postreport_{task_id}"))
-
-            # Пересылаем пост пользователю
-            await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
-
-            # Отправляем стикер и сообщение
-            await callback.message.answer_sticker(
-                'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
-            await asyncio.sleep(3)
-
-            # Начисляем награду сразу после просмотра поста
-            await DB.add_balance(amount=250, user_id=user_id)
-            await DB.add_completed_task(user_id, task_id, target_id, 250, task[1], status=0)
-
-            # Обновляем статистику
-            await DB.increment_statistics(1, 'all_see')
-            await DB.increment_statistics(2, 'all_see')
-            await DB.increment_statistics(1, 'all_taasks')
-            await DB.increment_statistics(2, 'all_taasks')
-
-            # Отправляем сообщение с кнопками
-            await callback.message.answer(
-                f"👀 <b>Вы просмотрели пост! +250 MITcoin</b>\n\nНажмите кнопку для просмотра следующего поста",
-                reply_markup=builder.as_markup())
-            # Обновляем задание в базе данных
-            await DB.update_task_amount(task_id)
-            updated_task = await DB.get_task_by_id(task_id)
-
-            # Если задание выполнено, удаляем его
-            if updated_task[3] == 0:
-                delete_task = await DB.get_task_by_id(task_id)
-                creator_id = delete_task[1]
-                await DB.delete_task(task_id)
-                await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на пост было успешно выполнено!",
-                                       reply_markup=back_menu_kb(user_id))
-
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            await callback.message.edit_text("Произошла ошибка при обработке задания. Попробуйте еще раз.",
-                                             reply_markup=back_work_menu_kb(user_id))
-        finally:
-            # Удаляем активное задание для пользователя
-            if user_id in active_tasks:
-                del active_tasks[user_id]
-    else:
-        await callback.message.edit_text("На данный момент заданий на посты нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb(user_id))
-        
-
-
-# Глобальный словарь для хранения активных заданий пользователей
-active_tasks = {} 
 
 @tasks.callback_query(F.data == 'work_post')
 async def works_post_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     user_id = callback.from_user.id
 
-    # Используем глобальный список обработанных заданий
-    from handlers.client.client import processed_tasks
+    try:
+        # 1. Получаем задания из кэша или БД
+        cached_tasks = await RedisTasksManager.get_cached_tasks('post')
+        if not cached_tasks:
+            db_tasks = await DB.select_post_tasks()
+            if db_tasks:
+                await RedisTasksManager.cache_tasks('post', db_tasks)
+                cached_tasks = db_tasks
 
-    # Проверяем, есть ли активное задание для пользователя
-    if user_id in active_tasks:
-        await callback.answer("Вы уже выполняете задание. Дождитесь его завершения.", show_alert=True)
-        return
-
-    if processed_tasks:
-        # Фильтруем задания, которые пользователь еще не выполнил
-        available_tasks = [task for task in processed_tasks if not await DB.is_task_completed(user_id, task[0])]
-
-        if not available_tasks:
-            await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
-                                             reply_markup=back_work_menu_kb(user_id))
+        if not cached_tasks:
+            await callback.message.edit_text(
+                "⛔ Нет доступных заданий на посты",
+                reply_markup=back_work_menu_kb(user_id)
+            )
             return
 
-        # Выбираем первое доступное задание
-        task = available_tasks[0]
-        task_id, target_id, amount = task[0], task[2], task[3]
-        chat_id, message_id = map(int, target_id.split(":"))
+        # 2. Фильтруем доступные задания
+        available_tasks = []
+        for task in cached_tasks:
+            try:
+                # Если task в виде tuple (из БД), конвертируем в словарь
+                if isinstance(task, (list, tuple)):
+                    task = {
+                        'id': task[0],
+                        'user_id': task[1],
+                        'target_id': task[2],
+                        'amount': task[3],
+                        'type': task[4],
+                        'status': task[5]
+                    }
 
-        # Сохраняем активное задание для пользователя
-        active_tasks[user_id] = task_id
+                if await DB.is_task_completed(user_id, task['id']):
+                    continue
+
+                task_data = {
+                    'id': task['id'],
+                    'user_id': task['user_id'],
+                    'link': task['target_id'],
+                    'amount': task['amount'],
+                    'type': task['type'],
+                    'status': task['status'],
+                }
+
+                if not task_data['link'] or ':' not in task_data['link']:
+                    print(f"⚠️ Некорректный формат ссылки: {task_data['link']}")
+                    continue
+
+                channel_id, message_id_str = task_data['link'].split(':', 1)
+                message_id = int(message_id_str)
+
+                try:
+                    chat = await bot.get_chat(chat_id=channel_id)
+                    if not chat:
+                        print(f"❌ Канал {channel_id} не найден")
+                        continue
+
+                    try:
+                        member = await bot.get_chat_member(channel_id, bot.id)
+                        if not member.can_post_messages:
+                            print(f"⚠️ Бот не имеет прав в канале {channel_id}")
+                            continue
+                    except:
+                        print(f"⚠️ Бот не состоит в канале {channel_id}")
+                        continue
+
+                    try:
+                        await bot.forward_message(chat_id=INFO_ID, from_chat_id=channel_id, message_id=message_id)
+                        task_data['channel_accessible'] = True
+                        task_data['post_accessible'] = True
+                        available_tasks.append(task_data)
+                    except Exception as e:
+                        print(f"❌ Ошибка проверки поста {message_id}: {str(e)}")
+                        continue
+
+                except Exception as e:
+                    print(f"❌ Ошибка проверки канала {channel_id}: {str(e)}")
+                    continue
+
+            except Exception as e:
+                print(f"⚠️ Ошибка обработки задания: {str(e)}")
+                continue
+
+        if not available_tasks:
+            await callback.message.edit_text(
+                "⛔ Нет доступных заданий",
+                reply_markup=back_work_menu_kb(user_id)
+            )
+            return
+
+        # 3. Обрабатываем первое доступное задание
+        task = available_tasks[0]
 
         try:
-            builder = InlineKeyboardBuilder()
-            builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
-            builder.add(InlineKeyboardButton(text="Дальше ⏭️", callback_data=f"work_post"))
-            # builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_post_{task_id}"))
+            channel_id, message_id_str = task['link'].split(':', 1)
+            message_id = int(message_id_str)
 
-            # Пересылаем пост пользователю
-            await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
+            await bot.forward_message(
+                chat_id=user_id,
+                from_chat_id=channel_id,
+                message_id=message_id
+            )
 
-            # Отправляем стикер и сообщение
+            keyboard = InlineKeyboardBuilder()
+            keyboard.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
+            keyboard.add(InlineKeyboardButton(text="Дальше ⏭️", callback_data="work_post"))
+            keyboard.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"postreport_{task['id']}"))
+
             await callback.message.answer_sticker(
-                'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
+                'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE'
+            )
             await asyncio.sleep(3)
 
-            # Начисляем награду сразу после просмотра поста
             await DB.add_balance(amount=250, user_id=user_id)
-            await DB.add_completed_task(user_id, task_id, target_id, 250, task[1], status=0)
+            await DB.add_completed_task(
+                user_id=user_id,
+                task_id=task['id'],
+                target_id=message_id,
+                task_sum=250,
+                owner_id=task['user_id'],
+                status=0
+            )
 
-            # Обновляем статистику
-            await DB.increment_statistics(1, 'all_see')
-            await DB.increment_statistics(2, 'all_see')
-            await DB.increment_statistics(1, 'all_taasks')
-            await DB.increment_statistics(2, 'all_taasks')
-            await update_dayly_and_weekly_tasks_statics(user_id)
-
-            # Отправляем сообщение с кнопками
             await callback.message.answer(
-                f"👀 <b>Вы просмотрели пост! +250 MITcoin</b>\n\nНажмите кнопку для просмотра следующего поста",
-                reply_markup=builder.as_markup())
+                "👀 <b>Вы просмотрели пост! +250 MITcoin</b>",
+                reply_markup=keyboard.as_markup()
+            )
 
-            # Обновляем задание в базе данных
-            await DB.update_task_amount(task_id)
-            updated_task = await DB.get_task_by_id(task_id)
+            await DB.update_task_amount(task['id'], int(task['amount'])-1)
+            updated_task = await DB.get_task_by_id(task['id'])
 
-            # Если задание выполнено, удаляем его
             if updated_task[3] == 0:
-                delete_task = await DB.get_task_by_id(task_id)
-                creator_id = delete_task[1]
-                await DB.delete_task(task_id)
-                await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на пост было успешно выполнено!",
-                                       reply_markup=back_menu_kb(user_id))
+                await DB.delete_task(task['id'])
+                await RedisTasksManager.invalidate_cache('post')
+                await bot.send_message(
+                    updated_task[1],
+                    "🎉 Ваше задание выполнено!",
+                    reply_markup=back_menu_kb(updated_task[1])
+                )
+            await RedisTasksManager.refresh_task_cache(bot, "post")
+            await RedisTasksManager.update_common_tasks_count(bot)
 
         except Exception as e:
-            print(f"Ошибка: {e}")
-            await callback.message.edit_text("Произошла ошибка при обработке задания. Попробуйте еще раз.",
-                                             reply_markup=back_work_menu_kb(user_id))
-        finally:
-            # Удаляем активное задание для пользователя
-            if user_id in active_tasks:
-                del active_tasks[user_id]
-    else:
-        await callback.message.edit_text("На данный момент заданий на посты нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb(user_id))
+            print(f"⚠️ Ошибка обработки поста: {str(e)}")
+            await callback.message.answer(
+                "⛔ Произошла ошибка при обработке поста",
+                reply_markup=back_work_menu_kb(user_id)
+            )
+
+    except Exception as e:
+        print(f"⚠️ Критическая ошибка в обработчике: {str(e)}")
+        await callback.message.edit_text(
+            "⛔ Произошла системная ошибка. Попробуйте позже.",
+            reply_markup=back_work_menu_kb(user_id)
+        )
+
+# # Глобальный словарь для хранения активных заданий пользователей
+# active_tasks = {} 
+
+# @tasks.callback_query(F.data == 'work_post')
+# async def works_post_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
+#     user_id = callback.from_user.id
+
+#     # Используем глобальный список обработанных заданий
+#     from handlers.client.client import processed_tasks
+
+#     # Проверяем, есть ли активное задание для пользователя
+#     if user_id in active_tasks:
+#         await callback.answer("Вы уже выполняете задание. Дождитесь его завершения.", show_alert=True)
+#         return
+
+#     if processed_tasks:
+#         # Фильтруем задания, которые пользователь еще не выполнил
+#         available_tasks = [task for task in processed_tasks if not await DB.is_task_completed(user_id, task[0])]
+
+#         if not available_tasks:
+#             await callback.message.edit_text("На данный момент доступных заданий нет, возвращайся позже 😉",
+#                                              reply_markup=back_work_menu_kb(user_id))
+#             return
+
+#         # Выбираем первое доступное задание
+#         task = available_tasks[0]
+#         task_id, target_id, amount = task[0], task[2], task[3]
+#         chat_id, message_id = map(int, target_id.split(":"))
+
+#         # Сохраняем активное задание для пользователя
+#         active_tasks[user_id] = task_id
+
+#         try:
+#             builder = InlineKeyboardBuilder()
+#             builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
+#             builder.add(InlineKeyboardButton(text="Дальше ⏭️", callback_data=f"work_post"))
+#             # builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_post_{task_id}"))
+
+#             # Пересылаем пост пользователю
+#             await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
+
+#             # Отправляем стикер и сообщение
+#             await callback.message.answer_sticker(
+#                 'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
+#             await asyncio.sleep(3)
+
+#             # Начисляем награду сразу после просмотра поста
+#             await DB.add_balance(amount=250, user_id=user_id)
+#             await DB.add_completed_task(user_id, task_id, target_id, 250, task[1], status=0)
+
+#             # Обновляем статистику
+#             await DB.increment_statistics(1, 'all_see')
+#             await DB.increment_statistics(2, 'all_see')
+#             await DB.increment_statistics(1, 'all_taasks')
+#             await DB.increment_statistics(2, 'all_taasks')
+#             await update_dayly_and_weekly_tasks_statics(user_id)
+
+#             # Отправляем сообщение с кнопками
+#             await callback.message.answer(
+#                 f"👀 <b>Вы просмотрели пост! +250 MITcoin</b>\n\nНажмите кнопку для просмотра следующего поста",
+#                 reply_markup=builder.as_markup())
+
+#             # Обновляем задание в базе данных
+#             await DB.update_task_amount(task_id)
+#             updated_task = await DB.get_task_by_id(task_id)
+
+#             # Если задание выполнено, удаляем его
+#             if updated_task[3] == 0:
+#                 delete_task = await DB.get_task_by_id(task_id)
+#                 creator_id = delete_task[1]
+#                 await DB.delete_task(task_id)
+#                 await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на пост было успешно выполнено!",
+#                                        reply_markup=back_menu_kb(user_id))
+
+#         except Exception as e:
+#             print(f"Ошибка: {e}")
+#             await callback.message.edit_text("Произошла ошибка при обработке задания. Попробуйте еще раз.",
+#                                              reply_markup=back_work_menu_kb(user_id))
+#         finally:
+#             # Удаляем активное задание для пользователя
+#             if user_id in active_tasks:
+#                 del active_tasks[user_id]
+#     else:
+#         await callback.message.edit_text("На данный момент заданий на посты нет, возвращайся позже 😉",
+#                                          reply_markup=back_work_menu_kb(user_id))
 
 
 

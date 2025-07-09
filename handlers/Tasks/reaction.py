@@ -186,7 +186,10 @@ async def reaction_post5(message: types.Message, state: FSMContext, bot: Bot):
             f"🔄 Количество: {executions}\n"
             f"💰 Стоимость: {total_cost} MITcoin"
         )
-        
+        # После создания задания
+        await RedisTasksManager.refresh_task_cache(bot, "reaction")
+        await RedisTasksManager.update_common_tasks_count(bot)
+
     except Exception as e:
         print(f"Ошибка при создании задания: {e}")
         await message.answer('❌ Произошла ошибка при создании задания. Попробуйте позже.')
@@ -211,92 +214,167 @@ async def reaction_post5(message: types.Message, state: FSMContext, bot: Bot):
 async def works_reaction_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     
-    async with reaction_task_lock:
-        try:
-            # Получаем и фильтруем задания
+    try:
+        # 1. Получаем задания из кэша
+        cached_tasks = await RedisTasksManager.get_cached_tasks('reaction') or []
+        print(cached_tasks)
+        if not cached_tasks:
+            # Если кэш пустой, загружаем из БД и кэшируем
             all_tasks = await DB.select_reaction_tasks()
-            available_tasks = []
-            
-            for task in all_tasks:
-                task_id = task[0]
-                if not (await DB.is_task_completed(user_id, task_id) and 
-                       not await DB.is_task_failed(user_id, task_id) and 
-                       not await DB.is_task_pending(user_id, task_id)):
+            if all_tasks:
+                # Фильтруем и обрабатываем задания перед кэшированием
+                valid_tasks = []
+                for task in all_tasks:
+                    try:
+                        if len(task) >= 7:  # Проверяем структуру задания
+                            valid_tasks.append(task)
+                    except:
+                        continue
+                
+                if valid_tasks:
+                    await RedisTasksManager.cache_tasks('reaction', valid_tasks)
+                    cached_tasks = valid_tasks
+        
+        if not cached_tasks:
+            await callback.message.edit_text(
+                "😕 Сейчас нет заданий на реакции",
+                reply_markup=back_work_menu_kb(user_id)
+            )
+            return
+
+        # 2. Фильтруем доступные задания для пользователя
+        available_tasks = []
+        for task in cached_tasks:
+            try:
+                task_id = task['id']
+                completed = await DB.is_task_completed(user_id, task_id)
+                failed = await DB.is_task_failed(user_id, task_id)
+                pending = await DB.is_task_pending(user_id, task_id)
+
+                print(f"Task {task_id} status: completed={completed}, failed={failed}, pending={pending}")
+
+                if not (completed or failed or pending):
                     available_tasks.append(task)
-            
-            if not available_tasks:
+            except Exception as e:
+                print(f"Ошибка проверки статуса задания {task_id}: {e}")
+                continue
+
+
+        if not available_tasks:
+            await callback.message.edit_text(
+                "🎉 Вы выполнили все доступные задания на реакции!",
+                reply_markup=back_work_menu_kb(user_id)
+            )
+            return
+
+        # 3. Выбираем случайное задание
+        task = random.choice(available_tasks)
+        try:
+            task_id = task['id']
+            target_id = task['target_id']
+            amount = all_price['reaction']
+            reaction_type = task['reaction_type']
+        except:
+            await callback.message.edit_text(
+                "⚠ Ошибка в данных задания",
+                reply_markup=back_work_menu_kb(user_id)
+            )
+            return
+
+        # 4. Обрабатываем target_id
+        try:
+            if ':' in target_id:
+                channel_part, post_id = target_id.split(':')
+                try:
+                    post_id = int(post_id)
+                except:
+                    post_id = None
+            else:
+                channel_part = target_id
+                post_id = None
+
+            # 5. Получаем информацию о канале
+            chat = await bot.get_chat(channel_part)
+            if not chat:
                 await callback.message.edit_text(
-                    "На данный момент доступных заданий на реакции нет, возвращайся позже 😉",
+                    "⚠ Не удалось получить информацию о канале",
                     reply_markup=back_work_menu_kb(user_id)
                 )
                 return
-                
-            # Выбираем случайное задание
-            random_task = random.choice(available_tasks)
-            task_id, target_id, amount, specific_reaction = random_task[0], random_task[2], random_task[3], random_task[6]
+
+            channel_name = chat.title
+            channel_username = chat.username if hasattr(chat, 'username') else None
+
+            # 6. Формируем ссылку
+            if post_id and channel_username:
+                post_link = f"https://t.me/{channel_username}/{post_id}"
+            elif channel_username:
+                post_link = f"https://t.me/{channel_username}"
+            else:
+                post_link = None
+
+            if not post_link:
+                await callback.message.edit_text(
+                    "⚠ Не удалось создать ссылку на задание",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
+                return
+
+            # 7. Создаем клавиатуру
+            builder = InlineKeyboardBuilder()
+            if post_link:
+                builder.add(InlineKeyboardButton(
+                    text="🚀 Перейти к заданию", 
+                    url=post_link
+                ))
             
-            # Обрабатываем target_id
-            try:
-                if ':' in target_id:
-                    channel_part, post_id = target_id.split(':')
-                    post_id = int(post_id)
-                else:
-                    channel_part = target_id
-                    post_id = None
-                
-                # Получаем информацию о канале
-                chat = await bot.get_chat(channel_part)
-                channel_id = chat.id
-                channel_username = chat.username if chat.username else f"c/{chat.id}"
-                
-                # Формируем сообщение
-                builder = InlineKeyboardBuilder()
-                if post_id:
-                    post_link = f"https://t.me/{channel_username}/{post_id}"
-                    builder.add(InlineKeyboardButton(
-                        text="🚀 Оставить реакцию", 
-                        url=post_link))
-                    channel_info = f"пост: @{channel_username.lstrip('@')}"
-                else:
-                    channel_link = f"https://t.me/{channel_username}"
-                    builder.add(InlineKeyboardButton(
-                        text="🚀 Перейти в канал", 
-                        url=channel_link))
-                    channel_info = f"канал: @{channel_username.lstrip('@')}"
-                
-                builder.add(InlineKeyboardButton(
-                    text="Проверить ✅", 
-                    callback_data=f"checkreaction_{task_id}"))
-                builder.add(InlineKeyboardButton(
-                    text="Репорт ⚠️", 
-                    callback_data=f"report_reaction_{task_id}"))
-                builder.add(InlineKeyboardButton(
-                    text="🔙 Назад", 
-                    callback_data="work_menu"))
-                builder.adjust(1, 2, 1)
-                
-                await callback.message.answer_sticker(
-                    'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE'
-                )
-                
-                await callback.message.answer(
-                    f"🎭 Реакция на {channel_info}\n"
-                    f"💸 Цена: {amount} $MICO\n"
-                    f"🎯 Реакция: {specific_reaction if specific_reaction else 'Любая положительная'}\n\n"
-                    "Нажмите кнопку <b>Проверить</b>, чтобы подтвердить выполнение задания.",
-                    reply_markup=builder.as_markup()
-                )
-                
-            except Exception as e:
-                print(f"Ошибка обработки задания {task_id}: {e}")
-                raise ValueError("Ошибка обработки задания")
-                
+            builder.add(InlineKeyboardButton(
+                text="✅ Проверить выполнение", 
+                callback_data=f"checkreaction_{task_id}"
+            ))
+            builder.add(InlineKeyboardButton(
+                text="⚠ Сообщить о проблеме", 
+                callback_data=f"report_reaction_{task_id}"
+            ))
+            builder.add(InlineKeyboardButton(
+                text="🔙 Назад", 
+                callback_data="work_menu"
+            ))
+            builder.adjust(1, 2, 1)
+
+            # 8. Отправляем сообщение
+            await callback.message.answer_sticker(
+                'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE'
+            )
+            
+            message_text = [
+                f"🎭 <b>Задание на реакцию</b>",
+                f"📢 Канал: {channel_name}",
+                f"💸 Награда: {amount} MITcoin",
+                f"👍 Требуемая реакция: {reaction_type if reaction_type else 'Любая положительная'}"
+            ]
+            
+            # if post_id:
+            #     message_text.append(f"📌 Номер поста: {post_id}")
+
+            await callback.message.answer(
+                "\n".join(message_text),
+                reply_markup=builder.as_markup()
+            )
+
         except Exception as e:
-            print(f"Ошибка в works_reaction_handler: {e}")
+            print(f"Ошибка обработки задания: {e}")
             await callback.message.edit_text(
-                "Произошла ошибка при обработке задания. Попробуйте позже.",
+                "⚠ Произошла ошибка при обработке задания",
                 reply_markup=back_work_menu_kb(user_id)
             )
+
+    except Exception as e:
+        print(f"Критическая ошибка в works_reaction_handler: {e}")
+        await callback.message.edit_text(
+            "⚠ Произошла системная ошибка",
+            reply_markup=back_work_menu_kb(user_id)
+        )
 
 
 @tasks.callback_query(F.data.startswith('checkreaction_'))
@@ -491,16 +569,16 @@ async def confirm_reaction_handler(callback: types.CallbackQuery, bot: Bot, stat
         f"🆔 ID задания: {task_id}"
     )
     
-    # Уведомляем создателя задания
-    creator_id = user_id
-    await bot.send_message(
-        creator_id,
-        f"🎉 <b>Задание на реакцию выполнено!</b>\n\n"
-        f"👤 Пользователь: @{callback.from_user.username} (ID: {user_id})\n"
-        f"📌 Пост: https://t.me/{channel_username}/{post_id}\n"
-        f"🎯 Реакция: {reaction if reaction else 'Любая'}\n"
-        f"🆔 ID задания: {task_id}"
-    )
+    # # Уведомляем создателя задания
+    # creator_id = user_id
+    # await bot.send_message(
+    #     creator_id,
+    #     f"🎉 <b>Задание на реакцию выполнено!</b>\n\n"
+    #     f"👤 Пользователь: @{callback.from_user.username} (ID: {user_id})\n"
+    #     f"📌 Пост: https://t.me/{channel_username}/{post_id}\n"
+    #     f"🎯 Реакция: {reaction if reaction else 'Любая'}\n"
+    #     f"🆔 ID задания: {task_id}"
+    # )
     
     # Удаляем сообщение с заданием
     data = await state.get_data()
@@ -509,6 +587,9 @@ async def confirm_reaction_handler(callback: types.CallbackQuery, bot: Bot, stat
         await bot.delete_message(CHECK_CHAT_ID, admin_message_id)
     
     await callback.answer("✅ Задание подтверждено.")
+    # После создания задания
+    await RedisTasksManager.refresh_task_cache(bot, "reaction")
+
 
 @tasks.callback_query(F.data.startswith('reject_reaction_'))
 async def reject_reaction_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):

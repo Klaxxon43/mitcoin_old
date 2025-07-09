@@ -165,6 +165,8 @@ async def handle_chat_selection(message: types.Message, state: FSMContext, bot: 
     await DB.add_balance(user_id, -price)
     await DB.add_transaction(user_id=user_id, amount=price, description="создание задания на вступление в чат", additional_info=None)
     await DB.add_task(user_id=user_id, target_id=chat_id, amount=amount, task_type=2)  # 2 - тип задания "чат"
+    await RedisTasksManager.refresh_task_cache(bot, "chat")
+    await RedisTasksManager.update_common_tasks_count(bot)
 
     await message.answer(
         f"✅ Задание на чат <b>{chat.title}</b> создано успешно!",
@@ -210,7 +212,9 @@ async def check_chat_admin_rights(callback: types.CallbackQuery, state: FSMConte
         await DB.add_balance(user_id, -price)
         await DB.add_transaction(user_id=user_id, amount=price, description="создание задания на вступление в чат", additional_info=None)
         await DB.add_task(user_id=user_id, target_id=chat_id, amount=amount, task_type=2)
-
+        await RedisTasksManager.refresh_task_cache(bot, "chat")
+        await RedisTasksManager.update_common_tasks_count(bot)
+        
         await callback.message.edit_text(
             f"✅ Задание на чат <b>{chat.title}</b> создано успешно!",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -235,17 +239,31 @@ async def check_chat_admin_rights(callback: types.CallbackQuery, state: FSMConte
         
 
 
-
 @tasks.callback_query(F.data == 'work_chat')
 async def tasksschat_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
 
     try:
-        # Получаем все задачи с ссылками из кэша и фильтруем
-        all_tasks = task_cache_chat.get('all_tasks', []) 
-        tasks = [
-            task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
-        ]
+        # Получаем задания из Redis или БД
+        all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
+        if not all_tasks:
+            await RedisTasksManager.refresh_task_cache(bot, 'chat')
+            all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
+
+        print("Задания для фильтрации:", all_tasks)
+
+        filtered_tasks = []
+        for task in all_tasks:
+            print("Проверка задания:", task)
+            try:
+                task_id = task["id"]
+                if not await DB.is_task_completed(user_id, task_id):
+                    filtered_tasks.append(task)
+            except Exception as inner_e:
+                print(f"Ошибка при фильтрации задания {task}: {inner_e}")
+
+        tasks = filtered_tasks
+
 
         if tasks:
             random.shuffle(tasks)
@@ -265,22 +283,27 @@ async def tasksschat_handler(callback: types.CallbackQuery, bot: Bot):
         builder = InlineKeyboardBuilder()
         builder.add(InlineKeyboardButton(text="🔄 Обновить", callback_data="work_chat"))
         await callback.message.edit_text(
-                "Произошла ошибка при загрузке заданий. Попробуйте обновить страницу.",
-            reply_markup=builder.as_markup()            )
+            "Произошла ошибка при загрузке заданий. Попробуйте обновить страницу.",
+            reply_markup=builder.as_markup()
+        )
+
         
 
-
-# Функция для генерации клавиатуры с заданиями
 async def generate_tasks_keyboard_chat(tasks, bot):
     builder = InlineKeyboardBuilder()
 
     # Выводим задания (по 5 на страницу)
     for task in tasks[:5]:  # Ограничиваем количество заданий на одной странице
-        chat_id = task[2]
-        chat_title = (await bot.get_chat(task[2])).title
+        chat_id = task["target_id"]
+        task_id = task["id"]
+        try:
+            chat = await bot.get_chat(chat_id)
+            chat_title = chat.title
+        except Exception:
+            chat_title = "Неизвестный чат"
 
         button_text = f"{chat_title} | +1500"
-        builder.row(InlineKeyboardButton(text=button_text, callback_data=f"chattask_{task[0]}"))
+        builder.row(InlineKeyboardButton(text=button_text, callback_data=f"chattask_{task_id}"))
 
     # Кнопка "Назад"
     builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
@@ -289,6 +312,7 @@ async def generate_tasks_keyboard_chat(tasks, bot):
     builder.row(InlineKeyboardButton(text="🔄 Обновить", callback_data="work_chat"))
 
     return builder.as_markup()
+
 
 @tasks.callback_query(lambda c: c.data.startswith("chattask_"))
 async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
@@ -364,6 +388,7 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
             delete_task = await DB.get_task_by_id(task_id)
             creator_id = delete_task[1]
             await DB.delete_task(task_id)
+            await RedisTasksManager.refresh_task_cache(bot, "chat")
             await bot.send_message(creator_id, f"🎉 Одно из ваших заданий было успешно выполнено",
                                    reply_markup=back_menu_kb(user_id))
 
@@ -381,7 +406,7 @@ async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
         await asyncio.sleep(3)
 
     # Обновляем список заданий после выполнения
-    all_tasks = task_cache_chat.get('all_tasks', [])
+    all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
     tasks = [
         task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
     ]
@@ -437,7 +462,7 @@ async def save_chat_report_description(message: types.Message, bot: Bot, state: 
         await asyncio.sleep(1)
 
         # Возвращаем пользователя к списку заданий
-        all_tasks = task_cache_chat.get('all_tasks', [])
+        all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
         tasks = [task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])]
 
         if tasks:

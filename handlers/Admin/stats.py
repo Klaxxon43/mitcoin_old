@@ -1,5 +1,4 @@
-from untils.Imports import *
-from untils.kb import admin_kb, get_stats_menu
+from utils.Imports import *
 from .admin import admin
 
 @admin.callback_query(F.data == 'stats')

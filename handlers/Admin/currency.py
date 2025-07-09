@@ -1,8 +1,8 @@
 from aiogram import F, types
 from aiogram.fsm.context import FSMContext
-from untils.Imports import *
+from utils.Imports import *
 from .states import edit_sell_currency
-from untils.kb import admin_kb
+from utils.kb import admin_kb
 from .admin import admin
 
 @admin.callback_query(F.data.startswith("editSellCurrency"))

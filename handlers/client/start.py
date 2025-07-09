@@ -1,4 +1,4 @@
-from untils.Imports import *
+from utils.Imports import *
 from .client import *
 from .states import *
 
@@ -9,30 +9,31 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
     
     # 1. Проверка на участие в конкурсе
     args = message.text.split()
-    if len(args) > 1 and args[1].startswith('contest_'):
-        contest_id = int(args[1].split('_')[1])
-        await handle_contest_participation(message, bot, contest_id, user_id, username)
-        return
-    if args[1].startswith('channel_'):
-        task_id = int(args[1].split('_')[1])
-        # Перенаправляем пользователя на выполнение задания канала
-        await handle_channel_task(message, bot, task_id)
-        return
-    elif args[1].startswith('chat_'):
-        task_id = int(args[1].split('_')[1])
-        # Перенаправляем пользователя на выполнение задания чата
-        await handle_chat_task(message, bot, task_id)
-        return
-    elif args[1].startswith('comment_'):
-        task_id = int(args[1].split('_')[1])
-        # Перенаправляем пользователя на выполнение задания комментария
-        await handle_comment_task(message, bot, task_id)
-        return
-    elif args[1].startswith('boost_'):
-        task_id = int(args[1].split('_')[1])
-        # Перенаправляем пользователя на выполнение задания буста
-        await handle_boost_task(message, bot, task_id)
-        return
+    if len(args) > 1:
+        if args[1].startswith('contest_'):
+            contest_id = int(args[1].split('_')[1])
+            await handle_contest_participation(message, bot, contest_id, user_id, username)
+            return
+        if args[1].startswith('channel_'):
+            task_id = int(args[1].split('_')[1])
+            # Перенаправляем пользователя на выполнение задания канала
+            await handle_channel_task(message, bot, task_id)
+            return
+        elif args[1].startswith('chat_'):
+            task_id = int(args[1].split('_')[1])
+            # Перенаправляем пользователя на выполнение задания чата
+            await handle_chat_task(message, bot, task_id)
+            return
+        elif args[1].startswith('comment_'):
+            task_id = int(args[1].split('_')[1])
+            # Перенаправляем пользователя на выполнение задания комментария
+            await handle_comment_task(message, bot, task_id)
+            return
+        elif args[1].startswith('boost_'):
+            task_id = int(args[1].split('_')[1])
+            # Перенаправляем пользователя на выполнение задания буста
+            await handle_boost_task(message, bot, task_id)
+            return
     
     # 2. Проверка подписки на обязательные каналы
     not_subscribed = await check_channel_subscriptions(user_id, bot)

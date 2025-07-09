@@ -1,4 +1,4 @@
-from untils.Imports import *
+from utils.Imports import *
 import json
 from datetime import datetime, timedelta
 import asyncio
@@ -190,14 +190,16 @@ async def restore_background_tasks(bot: Bot):
 
 
 async def start_background_tasks(bot: Bot, DB):
+    from handlers.Tasks.redis_task_manager import RedisTasksManager
     asyncio.create_task(check_all_active_boosts(bot)) #boost
-    asyncio.create_task(update_boost_tasks_periodically(bot)) #boost
-    asyncio.create_task(scheduled_cache_update_chat(bot, DB)) #chat
-    asyncio.create_task(update_tasks_periodically_link())
+    # asyncio.create_task(update_task_cache('boost', bot)) #boost
+    # asyncio.create_task(update_task_cache('chat', bot)) #chat
+    # asyncio.create_task(update_task_cache('link', bot)) #link
     asyncio.create_task(restore_background_tasks(bot))
-    asyncio.create_task(update_reaction_tasks_periodically()) #reactions
-    asyncio.create_task(process_tasks_periodically(bot)) #post
-    asyncio.create_task(scheduled_cache_update(bot, DB)) #channel
+    # asyncio.create_task(update_task_cache('reaction', bot)) #reactions
+    # asyncio.create_task(update_task_cache('post', bot)) #post
+    # asyncio.create_task(RedisTasksManager.schedule_cache_updates(bot)) #channel
+    # asyncio.create_task(RedisTasksManager.refresh_boost_cache(bot)) #boost2
     asyncio.create_task(remind_mining_collection(bot))
     asyncio.create_task(scheduled_db_backup(bot)) #отправка бд в чат
     asyncio.create_task(check_subscriptions_periodically(bot))

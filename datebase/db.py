@@ -2541,7 +2541,21 @@ class DataBase:
         '''
         return await self.con.execute(query, (task_type, user_id))
 
+    async def select_all_active_tasks(self):
+        """Получить все активные задания"""
+        async with self.con.cursor() as cur:
+            return await cur.fetchall(
+                "SELECT * FROM tasks WHERE status = 1 AND amount > 0"
+            )
 
+    async def calculate_rewards_for_type(self, task_type: int):
+        """Рассчитать общую сумму вознаграждений для типа заданий"""
+        async with self.con.cursor() as cur:
+            return await cur.fetchall(
+                "SELECT COALESCE(SUM(amount * price_per_action), 0) FROM tasks "
+                "WHERE type = $1 AND status = 1 AND amount > 0",
+                task_type
+            )
 
 
 

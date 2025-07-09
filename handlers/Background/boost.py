@@ -1,4 +1,5 @@
-from untils.Imports import *
+from utils.Imports import *
+from utils.redis_utils import *
 import json
 from datetime import datetime, timedelta
 import asyncio
@@ -6,57 +7,32 @@ from .locks import *
 
 task_processing_lock = asyncio.Lock()
 
-async def update_boost_tasks_periodically(bot: Bot):
-    """
-    Фоновая задача, которая каждые 10 минут обновляет список заданий на буст.
-    """
-    while True:
-        global available_boost_tasks
-        async with task_processing_lock:
-            # Получаем все задания из базы данных
-            all_tasks = await DB.select_boost_tasks()
+
+async def update_boost_tasks_periodically():
+    """Обновление заданий"""
+    cache_key = "boost"  # Заменить на соответствующий ключ для каждого типа
+    
+    try:
+        cached_tasks = await get_cached_data(cache_key)
+        if cached_tasks:
+            with cache_lock:  # Использовать соответствующий lock
+                global available_tasks  # Или processed_tasks, available_reaction_tasks и т.д.
+                available_tasks = cached_tasks
+            return
             
-            # Фильтруем задания, проверяя доступ бота к каналам
-            filtered_tasks = []
-            errors = []
-            for task in all_tasks:
-                try:
-                    # Извлекаем chat_id или username
-                    target = await extract_chat_id_or_username(task[2])
-                    print(target)
-                    
-                    # Пытаемся получить информацию о канале
-                    
-                    # chat: Chat = await bot.get_chat(target)
-                    # Если ошибки нет, значит бот имеет доступ к каналу
-                    filtered_tasks.append(task)
-                except Exception as e:
-                    errors.append(f"Ошибка при проверке доступа к каналу {task[2]}: {str(e)}")
-                    continue
-            
-            # Перемешиваем список заданий для случайного порядка
-            random.shuffle(filtered_tasks)
-            
-            # Обновляем глобальный список доступных заданий
-            available_boost_tasks = filtered_tasks
-            
-            # Отправляем отчёт в чат INFO_ID
-            report_message = (
-                f"✅ Задания на буст обновлены.\n"
-                f"📊 Всего заданий: {len(all_tasks)}\n"
-                f"🟢 Доступных заданий: {len(filtered_tasks)}\n"
-                f"🔴 Ошибок: {len(errors)}\n"
-            )
-            if errors:
-                report_message += "\nОшибки:\n" + "\n".join(errors)
-            
-            try:
-                await bot.send_message(chat_id=INFO_ID, text=report_message)
-            except Exception as e:
-                print(f"Ошибка при отправке отчёта: {e}")
+        all_tasks = await DB.select_tasks()  # Соответствующий метод для каждого типа
+        random.shuffle(all_tasks)
         
-        # Ждем 10 минут перед следующим обновлением
-        await asyncio.sleep(600)  # 600 секунд = 10 минут
+        # Сохраняем в Redis и обновляем глобальную переменную
+        await set_cached_data(cache_key, all_tasks, ttl=600)
+        with cache_lock:
+            available_tasks = all_tasks
+            print(f"Задания обновлены. Доступно: {len(available_tasks)}")
+            
+    except Exception as e:
+        print(f"Ошибка в update_tasks_periodically: {e}")
+
+    await asyncio.sleep(600)
 
 
 

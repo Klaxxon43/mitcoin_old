@@ -1,4 +1,4 @@
-from untils.Imports import *
+from utils.Imports import *
 from .locks import *
 
 async def scheduled_db_backup(bot: Bot):

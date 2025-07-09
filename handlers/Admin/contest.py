@@ -2,8 +2,7 @@ from datetime import datetime
 from aiogram import F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from untils.Imports import *
-from untils.kb import admin_kb
+from utils.Imports import *
 from .admin import admin
 from .states import CreateContest
 

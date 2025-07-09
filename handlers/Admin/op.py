@@ -1,8 +1,7 @@
 from aiogram import F, types
 from aiogram.fsm.context import FSMContext
-from untils.Imports import *
+from utils.Imports import *
 from .states import *
-from untils.kb import admin_kb, back_menu_kb
 from .admin import admin
 
 

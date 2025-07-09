@@ -1,5 +1,6 @@
-from untils.Imports import *
-from .states import *
+from utils.Imports import *
+from utils.redis_utils import *
+from handlers.client.states import *
 # from handlers.Checks.menu import *
 
 from handlers.Tasks.channel import generate_tasks_keyboard_chanel
@@ -1072,16 +1073,52 @@ ID того, кто пригласил: <code>{referrer_id}</code>\n
     await callback.answer()
 
 
+async def get_cached_data(key):
+    """Получить данные из кэша"""
+    data = redis_client.get(key)
+    return json.loads(data) if data else None
+
+async def set_cached_data(key, data, ttl=None):
+    """Сохранить данные в кэш"""
+    if ttl:
+        redis_client.setex(key, timedelta(seconds=ttl), json.dumps(data))
+    else:
+        redis_client.set(key, json.dumps(data))
+
+
+from utils.redis_utils import *
+
+async def update_message_with_data(message, data, user_id):
+    """Обновить сообщение с данными о заданиях"""
+    await message.edit_text(
+        f'''
+💰 Вы можете заработать - <b>{data['total']} $MICO</b>
+
+<b>Заданий на:</b>
+📣 Каналы - {data['channel']} 
+👥 Чаты - {data['chat']}         
+👀 Посты - {data['post']}
+💬 Комментарии - {data['comment']}
+❤️ Реакции - {data['reaction']} 
+🔗 Переходы в бота - {data['link']}
+🚀 Бусты - {data['boost']}
+
+🚨 <em>Запрещено покидать канал/чат ранее чем через 7 дней. За нарушение вы можете получить блокировку заработка или штраф!</em>
+
+<b>Выберите способ заработка</b> 👇    
+        ''',
+        reply_markup=work_menu_kb(user_id)
+    )
+
 @router.callback_query(F.data == 'work_menu')
 async def works_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
 
     if not await check_subs_op(user_id, bot):
         return
-    
+
     await callback.answer()
-    
-    # Сначала отправляем сообщение без данных о заданиях
+
     temp_message = await callback.message.edit_text(
         '''
 💰 Вы можете заработать - <b>загрузка...</b>
@@ -1101,73 +1138,30 @@ async def works_handler(callback: types.CallbackQuery, bot: Bot):
         ''',
         reply_markup=work_menu_kb(user_id)
     )
-    
-    # Проверяем кэш
-    cache_key = f"tasks_{user_id}"
-    if cache_key in task_count_cache:
-        cached_data = task_count_cache[cache_key]
-        await update_message_with_data(temp_message, cached_data, user_id)
-        return
-    
-    # Если в кэше нет, загружаем данные
-    (
-        available_chanel_tasks,
-        available_chat_tasks,
-        available_post_tasks,
-        available_comment_tasks,
-        available_link_tasks,
-        available_reaction_tasks,
-        available_boost_tasks,
-        total_count
-    ) = await asyncio.gather(
-        get_filtered_tasks_with_info(1, bot, user_id),
-        get_filtered_tasks_with_info(2, bot, user_id),
-        get_filtered_tasks_with_info(3, bot, user_id),
-        get_filtered_tasks_with_info(4, bot, user_id),
-        get_filtered_tasks_with_info(5, bot, user_id),
-        get_filtered_tasks_with_info(7, bot, user_id),
-        get_filtered_tasks_with_info(6, bot, user_id),
-        DB.calculate_total_cost()
-    )
-    
-    # Формируем данные для кэша
-    data = {
-        'chanel': len(available_chanel_tasks),
-        'chat': len(available_chat_tasks),
-        'post': len(available_post_tasks),
-        'comment': len(available_comment_tasks),
-        'link': len(available_link_tasks),
-        'reaction': len(available_reaction_tasks),
-        'boost': len(available_boost_tasks),
-        'total': total_count
-    }
-    
-    # Сохраняем в кэш
-    task_count_cache[cache_key] = data
-    
-    # Обновляем сообщение с актуальными данными
-    await update_message_with_data(temp_message, data, user_id)
 
-async def update_message_with_data(message, data, user_id):
-    await message.edit_text(
-        f'''
-💰 Вы можете заработать - <b>{data['total']} $MICO</b>
+    task_types = ['channel', 'chat', 'post', 'comment', 'reaction', 'link', 'boost']
+    counts = {key: 0 for key in task_types}
 
-<b>Заданий на:</b>
-📣 Каналы - {data['chanel']} 
-👥 Чаты - {data['chat']}         
-👀 Посты - {data['post']}
-💬 Комментарии - {data['comment']}
-❤️ Реакции - {data['reaction']} 
-🔗 Переходы в бота - {data['link']}
-🚀 Бусты - {data['boost']}
+    for task_type in task_types:
+        # Обновляем кэш перед подсчётом
+        await RedisTasksManager.refresh_task_cache(bot, task_type)
+        cached = await RedisTasksManager.get_cached_tasks(task_type)
 
-🚨 <em>Запрещено покидать канал/чат ранее чем через 7 дней. За нарушение вы можете получить блокировку заработка или штраф!</em>
+        valid_count = 0
+        for task in cached or []:
+            task_id = task['id'] if isinstance(task, dict) else task[0]
+            if not (await DB.is_task_completed(user_id, task_id) or
+                    await DB.is_task_failed(user_id, task_id) or
+                    await DB.is_task_pending(user_id, task_id)):
+                valid_count += 1
 
-<b>Выберите способ заработка</b> 👇    
-        ''',
-        reply_markup=work_menu_kb(user_id)
-    )
+        counts[task_type] = valid_count
+
+    counts['total'] = sum(counts.values())
+
+    await update_message_with_data(temp_message, counts, user_id)
+
+
 
 async def get_filtered_tasks_with_info(task_type, bot, user_id):
     tasks = await DB.select_tasks_by_type(task_type)

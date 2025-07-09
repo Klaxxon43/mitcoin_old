@@ -1,5 +1,5 @@
-from untils.Imports import *
-from untils.kb import back_menu_kb
+from utils.Imports import *
+from utils.kb import back_menu_kb
 from .admin import admin
 
 @admin.callback_query(F.data == 'adminoutputlist')

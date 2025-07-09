@@ -1,6 +1,6 @@
-from untils.Imports import *
+from utils.Imports import *
 from .states import PromoStates
-from untils.kb import admin_kb
+from utils.kb import admin_kb
 from datetime import datetime, timedelta
 import random
 import string

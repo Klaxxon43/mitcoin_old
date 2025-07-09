@@ -1,6 +1,6 @@
-from untils.Imports import *
+from utils.Imports import *
 from .states import MailingStates
-from untils.kb import admin_kb, back_menu_kb
+from utils.kb import admin_kb, back_menu_kb
 from .admin import admin
 
 @admin.callback_query(F.data == 'mailing')

@@ -109,6 +109,9 @@ async def like_post4(message: types.Message, state: FSMContext, bot: Bot):
 💰 Стоимость: {amount * all_price["comment"]} 
 ''')
                 await state.clear()
+
+                await RedisTasksManager.refresh_task_cache(bot, "comment")
+                await RedisTasksManager.update_common_tasks_count(bot)
             except:
                 bot_username = (await bot.get_me()).username
                 invite_link = f"http://t.me/{bot_username}?startchannel&admin=invite_users+manage_chat"
@@ -139,62 +142,67 @@ async def like_post4(message: types.Message, state: FSMContext, bot: Bot):
 @tasks.callback_query(F.data == 'work_comment')
 async def works_like_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
-    all_tasks = await DB.select_like_comment()  # Получаем список всех заданий на комментарии
+    
+    try:
+        # Получаем задания из Redis или БД
+        all_tasks = await RedisTasksManager.get_cached_tasks('comment') or []
+        print(all_tasks)
+        if not all_tasks:
+            await RedisTasksManager.refresh_task_cache(bot, 'chat')
+            all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
 
-    if all_tasks:
-        # Фильтруем задания, исключая выполненные, проваленные и находящиеся на проверке
-        available_tasks = [
-            task for task in all_tasks
-            if not await DB.is_task_completed(user_id, task[0])  # Исключаем выполненные
-            and not await DB.is_task_failed(user_id, task[0])  # Исключаем проваленные
-            and not await DB.is_task_pending(user_id, task[0])  # Исключаем задания на проверке
-        ]
-        
-        if not available_tasks:
+        if all_tasks:
+            available_tasks = [
+                task for task in all_tasks
+                if not await DB.is_task_completed(user_id, task['id'])
+                and not await DB.is_task_failed(user_id, task['id'])
+                and not await DB.is_task_pending(user_id, task['id'])
+            ]
+            
+            if not available_tasks:
+                await callback.message.edit_text(
+                    "На данный момент доступных заданий на комментарии нет, возвращайся позже 😉",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
+                return 
+            
+            random_task = random.choice(available_tasks)
+            task_id, target_id, amount = random_task['id'], random_task['target_id'], random_task['amount']
+            chat_id, message_id = map(int, target_id.split(":"))
+            
+            try:
+                await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
+                await callback.message.answer_sticker(
+                    'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
+                await asyncio.sleep(3)
+
+                builder = InlineKeyboardBuilder()
+                builder.add(InlineKeyboardButton(text="Проверить ✅", callback_data=f"comment_{task_id}"))
+                builder.add(InlineKeyboardButton(text="✋Ручная проверка", callback_data=f"2comment_{task_id}"))
+                builder.add(InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}"))
+                builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_comment_{task_id}"))
+                builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
+                builder.adjust(2, 2, 1)
+
+                await callback.message.answer(
+                    "💬 Напишите комментарий под постом и нажмите кнопку <b>Проверить</b>...",
+                    reply_markup=builder.as_markup()
+                )
+            except Exception as e:
+                print(f"Ошибка: {e}")
+                await callback.message.edit_text(
+                    "Произошла ошибка при обработке задания. Попробуйте позже.",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
+        else:
             await callback.message.edit_text(
-                "На данный момент доступных заданий на комментарии нет, возвращайся позже 😉",
+                "На данный момент заданий на комментарии нет, возвращайся позже 😉",
                 reply_markup=back_work_menu_kb(user_id)
             )
-            return 
-        
-        # Выбираем случайное задание из списка доступных
-        random_task = random.choice(available_tasks)
-        task_id, target_id, amount = random_task[0], random_task[2], random_task[3]
-        chat_id, message_id = map(int, target_id.split(":"))
-        
-        try:
-            # Пересылаем пост пользователю
-            await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
-            await callback.message.answer_sticker(
-                'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
-            await asyncio.sleep(3)
-
-            # Создаем клавиатуру с кнопкой "Проверить"
-            builder = InlineKeyboardBuilder()
-            builder.add(InlineKeyboardButton(text="Проверить ✅", callback_data=f"comment_{task_id}"))
-            builder.add(InlineKeyboardButton(text="✋Ручная проверка", callback_data=f"2comment_{task_id}"))
-            builder.add(InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}"))
-            builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_comment_{task_id}"))
-            builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
-
-            builder.adjust(2, 2, 1)
-
-            await callback.message.answer(
-                "💬 Напишите комментарий под постом и нажмите кнопку <b>Проверить</b>, чтобы подтвердить выполнение задания.\n\n"
-                "<em>Комментарий не должен быть эмодзи, стикером, GIF или другим не текстовым содержимым.</em>\n"
-                "<em>Комментарий должен содержать осмысленный текст, соответствующий теме поста.</em>\n"
-                "<em>Комментарии, не соответствующие этим критериям, могут быть отклонены при проверке.</em>\n\n",
-                reply_markup=builder.as_markup()
-            )
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            await callback.message.edit_text(
-                "Произошла ошибка при обработке задания. Попробуйте позже.",
-                reply_markup=back_work_menu_kb(user_id)
-            )
-    else:
+    except Exception as e:
+        print(f"Ошибка в works_like_handler: {e}")
         await callback.message.edit_text(
-            "На данный момент заданий на комментарии нет, возвращайся позже 😉",
+            "Произошла ошибка. Попробуйте позже.",
             reply_markup=back_work_menu_kb(user_id)
         )
 
@@ -241,6 +249,8 @@ async def check_like_handler(callback: types.CallbackQuery, bot: Bot):
             await DB.delete_task(task_id)
             await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на комментарий было успешно выполнено!",
                                    reply_markup=back_menu_kb(user_id))
+            
+            await RedisTasksManager.refresh_task_cache(bot, "comment")
     else:
         # Лайк не обнаружен
         await callback.answer("❌ Комментарий не был написан. Попробуйте ещё раз.", show_alert=True)

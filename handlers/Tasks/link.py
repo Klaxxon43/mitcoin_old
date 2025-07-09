@@ -219,117 +219,140 @@ async def link_task5(message: types.Message, state: FSMContext, bot: Bot):
 @tasks.callback_query(F.data == 'work_link')
 async def works_link_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     user_id = callback.from_user.id
-    global available_tasks
-
+    
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="Автоматическая проверка 🤖", callback_data="work_link_auto"))
     builder.add(InlineKeyboardButton(text="Ручная проверка 👨‍💻", callback_data="work_link_manual"))
     builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
     builder.adjust(1)
+    
     await callback.message.edit_text(
-        "🔍 <b>Выберите тип задания для выполнения:</b>\n\n"
-        "🤖 <b>Автоматическая проверка:</b> Переход по ссылке и пересылка сообщения от бота.\n"
-        "👨‍💻 <b>Ручная проверка:</b> Выполнение условий, указанных создателем задания.",
+        "🔍 <b>Выберите тип задания для выполнения:</b>",
         reply_markup=builder.as_markup()
     )
 
 @tasks.callback_query(F.data == 'work_link_auto')
 async def work_link_auto_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     user_id = callback.from_user.id
-    all_tasks = await DB.select_link_tasks()  # Получаем список всех заданий на переход по ссылке
+    
+    try:
+        # Получаем задания из Redis или БД
+        all_tasks = await RedisTasksManager.get_cached_tasks('link')
+        if not all_tasks:
+            all_tasks = await DB.select_link_tasks()
+            if all_tasks:
+                await RedisTasksManager.cache_tasks('link', all_tasks)
 
-    if all_tasks:
-        # Фильтруем задания, исключая выполненные, проваленные и находящиеся на проверке
-        available_tasks = [
-            task for task in all_tasks
-            if not await DB.is_task_completed(user_id, task[0])  # Исключаем выполненные
-            and not await DB.is_task_failed(user_id, task[0])  # Исключаем проваленные
-            and not await DB.is_task_pending(user_id, task[0])  # Исключаем задания на проверке
-            and task[6] == 0  # Только задания с автоматической проверкой
-        ]
-        
-        if not available_tasks:
-            await callback.message.edit_text(
-                "На данный момент доступных заданий на переход по ссылке с автоматической проверкой нет, возвращайся позже 😉",
-                reply_markup=back_work_menu_kb(user_id)
-            )
-            return 
-        
-        # Выбираем случайное задание из списка доступных
-        random_task = random.choice(available_tasks)
-        task_id, target_link, amount = random_task[0], random_task[2], random_task[3]
+        if all_tasks:
+            available_tasks = [
+                task for task in all_tasks
+                if not await DB.is_task_completed(user_id, task[0])
+                and not await DB.is_task_failed(user_id, task[0])
+                and not await DB.is_task_pending(user_id, task[0])
+                and task[6] == 0  # Автоматическая проверка
+            ]
+            
+            if not available_tasks:
+                await callback.message.edit_text(
+                    "Нет доступных заданий с автоматической проверкой",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
+                return 
+            
+            random_task = random.choice(available_tasks)
+            task_id, target_link, amount = random_task[0], random_task[2], random_task[3]
 
-        try:
             await state.set_state(LinkPromotionStates.performing_task)
             await state.update_data(task_id=task_id, target_link=target_link, task_type=0)
 
             await callback.message.answer(
-                f"🔗 <b>Задание:</b> Перейдите по ссылке: {target_link}\n\n"
-                f"💸 <b>Награда:</b> {all_price['link']} MITcoin\n\n"
-                f"После выполнения задания перешлите сообщение от этого бота.",
+                f"🔗 <b>Задание:</b> Перейдите по ссылке: {target_link}",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="🔙 Назад", callback_data="work_link")],
                     [InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}")],
                     [InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_link_{task_id}")]
                 ]))
-
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            await callback.message.edit_text("Произошла ошибка при обработке задания. Попробуйте позже.",
-                                             reply_markup=back_work_menu_kb(user_id))
-    else:
-        await callback.message.edit_text("На данный момент заданий на переход по ссылке нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb(user_id))
+        else:
+            await callback.message.edit_text(
+                "Нет доступных заданий",
+                reply_markup=back_work_menu_kb(user_id)
+            )
+    except Exception as e:
+        print(f"Ошибка в work_link_auto_handler: {e}")
+        await callback.message.edit_text(
+            "Произошла ошибка. Попробуйте позже.",
+            reply_markup=back_work_menu_kb(user_id)
+        )
 
 @tasks.callback_query(F.data == 'work_link_manual')
 async def work_link_manual_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     user_id = callback.from_user.id
-    all_tasks = await DB.select_link_tasks()  # Получаем список всех заданий на переход по ссылке
+    
+    try:
+        # Получаем задания из Redis или БД
+        all_tasks = await RedisTasksManager.get_cached_tasks('link')
+        if not all_tasks:
+            all_tasks = await DB.select_link_tasks()
+            if all_tasks:
+                await RedisTasksManager.cache_tasks('link', all_tasks)
 
-    if all_tasks:
-        # Фильтруем задания, исключая выполненные, проваленные и находящиеся на проверке
-        available_tasks = [
-            task for task in all_tasks
-            if not await DB.is_task_completed(user_id, task[0])  # Исключаем выполненные
-            and not await DB.is_task_failed(user_id, task[0])  # Исключаем проваленные
-            and not await DB.is_task_pending(user_id, task[0])  # Исключаем задания на проверке
-            and task[6] != 0  # Только задания с ручной проверкой
-        ]
-        
-        if not available_tasks:
-            await callback.message.edit_text(
-                "На данный момент доступных заданий на переход по ссылке с ручной проверкой нет, возвращайся позже 😉",
-                reply_markup=back_work_menu_kb(user_id)
-            )
-            return 
-        
-        # Выбираем случайное задание из списка доступных
-        random_task = random.choice(available_tasks)
-        task_id, target_link, amount, other = random_task[0], random_task[2], random_task[3], random_task[6]
-        description = str(other).split("|")[1]
+        if all_tasks:
+            available_tasks = [
+                task for task in all_tasks
+                if not await DB.is_task_completed(user_id, task[0])
+                and not await DB.is_task_failed(user_id, task[0])
+                and not await DB.is_task_pending(user_id, task[0])
+                and task[6] != 0  # Только ручная проверка
+            ]
+            
+            if not available_tasks:
+                await callback.message.edit_text(
+                    "Нет доступных заданий с ручной проверкой",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
+                return
+            
+            random_task = random.choice(available_tasks)
+            task_id, target_link, amount, other = random_task[0], random_task[2], random_task[3], random_task[6]
+            
+            try:
+                description = str(other).split("|")[1] if "|" in str(other) else "Выполните условия задания"
+            except:
+                description = "Выполните условия задания"
 
-        try:
             await state.set_state(LinkPromotionStates.performing_task)
-            await state.update_data(task_id=task_id, target_link=target_link, task_type=1)
+            await state.update_data(
+                task_id=task_id,
+                target_link=target_link,
+                task_type=1,
+                description=description
+            )
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="work_link")],
+                [InlineKeyboardButton(text="Отправить скриншот 📷", callback_data=f"link_{task_id}")],
+                [InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}")],
+                [InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_link_{task_id}")]
+            ])
 
             await callback.message.answer(
-                f"🔗 <b>Задание:</b> Перейдите по ссылке: {target_link}\n\n"
+                f"🔗 <b>Задание:</b> {target_link}\n\n"
                 f"📝 <b>Условие:</b> {description}\n\n"
                 f"💸 <b>Награда:</b> {all_price['link']} MITcoin\n\n"
-                f"После выполнения задания отправьте скриншот в качестве доказательства.",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔙 Назад", callback_data="work_link")],
-                    [InlineKeyboardButton(text="Отправить скриншот 📷", callback_data=f"link_{task_id}")],
-                    [InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}")],
-                    [InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_link_{task_id}")]
-                ])) 
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            await callback.message.edit_text("Произошла ошибка при обработке задания. Попробуйте позже.",
-                                             reply_markup=back_work_menu_kb(user_id))
-    else:
-        await callback.message.edit_text("На данный момент заданий на переход по ссылке нет, возвращайся позже 😉",
-                                         reply_markup=back_work_menu_kb(user_id))
+                f"Отправьте скриншот выполнения:",
+                reply_markup=keyboard
+            )
+        else:
+            await callback.message.edit_text(
+                "Нет доступных заданий",
+                reply_markup=back_work_menu_kb(user_id)
+            )
+    except Exception as e:
+        print(f"Ошибка в work_link_manual_handler: {e}")
+        await callback.message.edit_text(
+            "Произошла ошибка. Попробуйте позже.",
+            reply_markup=back_work_menu_kb(user_id)
+        )
 
 
 @tasks.callback_query(F.data.startswith('link_'))

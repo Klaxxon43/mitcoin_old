@@ -1,6 +1,5 @@
-from untils.Imports import *
+from utils.Imports import *
 from .states import AdminActions
-from untils.kb import admin_kb
 from .admin import admin
 
 @admin.callback_query(F.data == 'view_user_profile')

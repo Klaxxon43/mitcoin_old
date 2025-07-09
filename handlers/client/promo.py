@@ -1,4 +1,4 @@
-from untils.Imports import *
+from utils.Imports import *
 from handlers.client.client import profile_handler  # Импортируем обработчик профиля
 
 pr = Router()
