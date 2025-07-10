@@ -1,40 +1,6 @@
-# Стандартные библиотеки
-import os, asyncio, logging, random, uuid, sys, traceback, time, emoji, math
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Tuple
-import pytz, requests
-from aiocryptopay import AioCryptoPay, Networks
-from cachetools import TTLCache
-
-# Aiogram основные компоненты
-from aiogram import Bot, F, types, Router, Dispatcher
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.enums import ChatMemberStatus, ChatType
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.enums.dice_emoji import DiceEmoji
-from aiogram.types import (
-    InlineQueryResultArticle, InputTextMessageContent,
-    InlineKeyboardMarkup, InlineKeyboardButton,
-    FSInputFile, InputMediaPhoto, ChatMemberUpdated,
-    ContentType, LabeledPrice, PreCheckoutQuery,
-    BufferedInputFile, Chat
-)
-
-# Локальные модули
-from datebase.db import DB, Promo
-from utils.kb import (
-    menu_kb, back_menu_kb, profile_kb, pr_menu_kb,
-    pr_menu_canc, work_menu_kb, back_work_menu_kb,
-    back_profile_kb, select_deposit_menu_kb,
-    back_dep_kb, cancel_all_kb
-)
-from config import CRYPTOBOT_TOKEN, ADMINS_ID, BotsAPI
+from utils.Imports import *
 from threading import Lock
-
+import string
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,22 +10,59 @@ bots = Router()
 task_cache = {}
 task_cache_chat = {}
 
-CHECK_CHAT_ID = -4792065005  # ID чата для проверки заданий
-DB_CHAT_ID = -4683486408
-INFO_ID = -4784146602
-TASKS_CHAT_ID = -1002291978719
-REPORT_CHAT_ID = -1002291978719
 
-MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 
-# Добавим в начало файла
+# Генерация уникального кода для TON транзакций
+def generate_unique_code(length=8):
+    """Генерация уникального кода для транзакции"""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+
+async def check_ton_payment(expected_amount_nano: str, comment: str) -> bool:
+    """Проверка платежа в сети TON с учетом возможного округления"""
+    print(f"\n🔍 Starting TON payment check for amount: {expected_amount_nano}, comment: '{comment}'")
+    
+    try:
+        response = requests.get(
+            f"{TON_API_BASE}getTransactions",
+            params={
+                'address': TON_WALLET,
+                'limit': 100,
+                'api_key': TON_API_TOKEN,
+                'archival': True
+            },
+            timeout=10
+        )
+        
+        data = response.json()
+        if not data.get('ok', False):
+            return False
+
+        expected = int(expected_amount_nano)
+        tolerance = 1000000  # Допустимое отклонение ±0.001 TON (1,000,000 нанотонов)
+        
+        for tx in data.get('result', []):
+            in_msg = tx.get('in_msg', {})
+            tx_value = int(in_msg.get('value', 0))
+            tx_comment = in_msg.get('message', '').strip()
+            
+            print(f"Checking: {tx_value} vs {expected} (±{tolerance}), comment: '{tx_comment}'")
+            
+            if (abs(tx_value - expected) <= tolerance and 
+                tx_comment == comment.strip()):
+                return True
+
+        return False
+    except Exception as e:
+        print(f"TON payment check error: {e}")
+        return False
+
 PREMIUM_SERVICES = {
-    "Подписчики": 31388,
-    "Подписчики+": 32281,
-    "Просмотры": 31621,
-    "Опросы": 787,
-    "Боты": 26716
-}
+    "➕ Подписчики": 31388,
+    "➕ Подписчики+": 32281,
+    "👁 Просмотры": 31621,
+    "📊 Опросы": 787,
+    "🤖 Боты": 26716
+} 
 
 REACTION_SERVICES = {
     "🔥": 31910,
@@ -220,7 +223,17 @@ async def update_services_cache():
         logger.error(f"Error updating services cache: {e}")
 
 @bots.callback_query(F.data == "bots_menu")
-async def show_bots_menu(callback: types.CallbackQuery, state: FSMContext):
+async def show_bots_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    user_id = callback.from_user.id
+
+    from handlers.client.client import check_subs_op
+    if not await check_subs_op(user_id, bot):
+        return
+    
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
+    
     # Сначала сразу показываем меню
     builder = InlineKeyboardBuilder()
     
@@ -235,7 +248,7 @@ async def show_bots_menu(callback: types.CallbackQuery, state: FSMContext):
             builder.button(text=service_name, callback_data=f"bots_srv_{PREMIUM_SERVICES[service_name]}")
     
     # Кнопка реакций
-    builder.button(text="Реакции", callback_data="bots_reactions")
+    builder.button(text="❤️ Реакции", callback_data="bots_reactions")
     builder.button(text='🔙 Назад', callback_data='back_menu')
     builder.adjust(1)
     
@@ -337,6 +350,8 @@ class OrderStates(StatesGroup):
     AWAITING_LINK = State()
     AWAITING_QUANTITY = State()
     VIEW_ORDERS = State()
+    PAYMENT_METHOD = State()
+    AWAITING_PAYMENT = State()
 
 # Обновим обработчик покупки
 @bots.callback_query(F.data.startswith("buy_"))
@@ -436,11 +451,288 @@ async def cancel_order(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
 
+# Обработчик подтверждения заказа
+@bots.callback_query(F.data == "confirm_order")
+async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    
+    # Показываем меню выбора способа оплаты
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💳 CryptoBot (USDT)", callback_data="pay_cryptobot")
+    builder.button(text="💎 TON", callback_data="pay_ton")
+    builder.button(text="🔙 Назад", callback_data="back_to_order_confirmation")
+    builder.adjust(1)
+    
+    await callback.message.edit_text(
+        f"💳 <b>Выберите способ оплаты:</b>\n\n"
+        f"Сумма к оплате: {data['cost']} руб.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    
+    await state.set_state(OrderStates.PAYMENT_METHOD)
+    await callback.answer()
+
+# Обработчик возврата к подтверждению заказа
+@bots.callback_query(F.data == "back_to_order_confirmation", OrderStates.PAYMENT_METHOD)
+async def back_to_order_confirmation(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Подтвердить", callback_data="confirm_order")
+    builder.button(text="❌ Отменить", callback_data="cancel_order")
+    builder.adjust(2)
+    
+    await callback.message.edit_text(
+        f"📝 <b>Подтвердите заказ:</b>\n\n"
+        f"• Услуга: {data['service_name']}\n"
+        f"• Ссылка: {data['link']}\n"
+        f"• Количество: {data['quantity']}\n"
+        f"• Стоимость: {data['cost']} руб.\n\n"
+        f"После оплаты заказ начнет выполняться автоматически.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    
+    await state.set_state(OrderStates.AWAITING_QUANTITY)
+    await callback.answer()
+
+# Обработчик выбора оплаты через CryptoBot
+@bots.callback_query(F.data == "pay_cryptobot", OrderStates.PAYMENT_METHOD)
+async def pay_with_cryptobot(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    user_id = callback.from_user.id
+    
+    try:
+        async with AioCryptoPay(token=CRYPTOBOT_TOKEN) as crypto:
+
+            # Создаем счет в CryptoPay
+            invoice = await crypto.create_invoice(
+                asset='USDT',
+                amount=data['cost'],
+                description=f"Оплата заказа на {data['quantity']} {data['service_name']}",
+                expires_in=1800  # 30 минут
+            )
+        
+        # Сохраняем информацию о платеже
+        await state.update_data(
+            invoice_id=invoice.invoice_id,
+            payment_method='cryptobot'
+        )
+        
+        builder = InlineKeyboardBuilder()
+        builder.button(text="💳 Оплатить", url=invoice.bot_invoice_url)
+        builder.button(text="✅ Проверить оплату", callback_data="check_payment")
+        builder.button(text="❌ Отменить", callback_data="cancel_payment")
+        builder.adjust(1)
+        
+        await callback.message.edit_text(
+            f"💳 <b>Оплата через CryptoBot</b>\n\n"
+            f"Сумма к оплате: {data['cost']} USDT\n"
+            f"Счет действителен в течение 30 минут\n\n"
+            f"После оплаты нажмите кнопку 'Проверить оплату'",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+        
+        await state.set_state(OrderStates.AWAITING_PAYMENT)
+    except Exception as e:
+        logger.error(f"Error creating CryptoPay invoice: {e}")
+        await callback.message.edit_text(
+            "❌ Произошла ошибка при создании счета. Пожалуйста, попробуйте позже."
+        )
+        await state.clear()
+    
+    await callback.answer()
+
+# Обработчик выбора оплаты через TON
+@bots.callback_query(F.data == "pay_ton", OrderStates.PAYMENT_METHOD)
+async def pay_with_ton(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    user_id = callback.from_user.id
+    
+    try:
+        # Получаем курс TON к рублю
+        response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=rub")
+        ton_rate = response.json()['the-open-network']['rub']
+        
+        # Конвертируем рубли в TON
+        ton_amount = round(data['cost'] / ton_rate, 4)
+        amount_nano = int(ton_amount * 1_000_000_000)  # Конвертация в нанотоны
+        
+        # Генерируем уникальный комментарий
+        unique_code = generate_unique_code()
+        
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(
+                text="Ton Wallet",
+                url=f"ton://transfer/{TON_WALLET}?amount={amount_nano}&text={unique_code}"
+            ),
+            InlineKeyboardButton(
+                text="Tonkeeper",
+                url=f"https://app.tonkeeper.com/transfer/{TON_WALLET}?amount={amount_nano}&text={unique_code}"
+            )
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text="Tonhub",
+                url=f"https://tonhub.com/transfer/{TON_WALLET}?amount={amount_nano}&text={unique_code}"
+            )
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text="✅ Проверить оплату",
+                callback_data=f"check_ton_payment:{unique_code}:{amount_nano}:{data['cost']}"
+            )
+        )
+        builder.row(
+            InlineKeyboardButton(
+                text="❌ Отменить",
+                callback_data="cancel_payment"
+            )
+        )
+        
+        await callback.message.edit_text(
+            f"💎 <b>Оплата через TON</b>\n\n"
+            f"Сумма к оплате: <b>{ton_amount:.4f} TON</b> (~{data['cost']:.2f}₽)\n\n"
+            f"Пожалуйста, отправьте <b>{ton_amount:.4f} TON</b> на адрес:\n"
+            f"<code>{TON_WALLET}</code>\n\n"
+            f"С комментарием:\n<code>{unique_code}</code>\n\n"
+            "После оплаты нажмите кнопку 'Проверить оплату'",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+        
+        await state.update_data(
+            amount_nano=str(amount_nano),
+            unique_code=unique_code,
+            payment_method='ton'
+        )
+        
+        await state.set_state(OrderStates.AWAITING_PAYMENT)
+    except Exception as e:
+        logger.error(f"Error creating TON payment: {e}")
+        await callback.message.edit_text(
+            "❌ Произошла ошибка при создании платежа. Пожалуйста, попробуйте позже."
+        )
+        await state.clear()
+    
+    await callback.answer()
+
+# Обработчик проверки оплаты TON
+@bots.callback_query(F.data.startswith("check_ton_payment:"), OrderStates.AWAITING_PAYMENT)
+async def check_ton_payment_handler(callback: types.CallbackQuery, state: FSMContext):
+    parts = callback.data.split(":")
+    unique_code = parts[1]
+    amount_nano = parts[2]
+    rub_amount = float(parts[3])
+    
+    data = await state.get_data()
+    
+    # Проверяем, что это тот же заказ
+    if data.get('unique_code') != unique_code or str(data.get('amount_nano')) != amount_nano:
+        await callback.answer("❌ Неверные данные платежа", show_alert=True)
+        return
+    
+    # Проверяем платеж
+    result = await check_ton_payment(amount_nano, unique_code)
+    
+    if not result:
+        await callback.answer(
+            "Платеж еще не получен. Пожалуйста, подождите и попробуйте снова через 10 секунд.",
+            show_alert=True
+        )
+        return
+    
+    # Если платеж подтвержден, создаем заказ
+    await create_order_after_payment(callback, state, rub_amount)
+    await callback.answer()
+
+# Обработчик проверки оплаты через CryptoBot
+@bots.callback_query(F.data == "check_payment", OrderStates.AWAITING_PAYMENT)
+async def check_cryptobot_payment(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    
+    if 'invoice_id' not in data:
+        await callback.answer("❌ Не найден счет для проверки", show_alert=True)
+        return
+    
+    try:
+        async with AioCryptoPay(token=CRYPTOBOT_TOKEN) as crypto:
+            invoice = await crypto.get_invoices(invoice_ids=data['invoice_id'])
+            
+        if invoice.status == 'paid':
+            # Если оплачено, создаем заказ
+            await create_order_after_payment(callback, state, data['cost'])
+        else:
+            await callback.answer(
+                "Платеж еще не получен. Пожалуйста, подождите и попробуйте снова через 10 секунд.",
+                show_alert=True
+            )
+    except Exception as e:
+        logger.error(f"Error checking CryptoPay invoice: {e}")
+        await callback.answer(
+            "Произошла ошибка при проверке платежа. Пожалуйста, попробуйте позже.",
+            show_alert=True
+        )
+    
+    await callback.answer()
+
+# Общая функция для создания заказа после успешной оплаты
+async def create_order_after_payment(callback: types.CallbackQuery, state: FSMContext, amount: float):
+    data = await state.get_data()
+    
+    # Создаем заказ в API
+    order_result = await BotsAPI.create_order(
+        service_id=data['service_id'],
+        link=data['link'],
+        quantity=data['quantity']
+    )
+    
+    if not order_result or 'order' not in order_result:
+        await callback.message.edit_text("❌ Ошибка при создании заказа. Попробуйте позже.")
+        await state.clear()
+        return
+    
+    # Сохраняем заказ в БД
+    order_id = order_result['order']
+    await DB.add_order(
+        user_id=callback.from_user.id,
+        order_id=order_id,
+        service_id=data['service_id'],
+        link=data['link'],
+        quantity=data['quantity'],
+        cost=amount,
+        status='pending',  # Начальный статус
+    )
+    
+    # Получаем информацию об услуге для красивого отображения
+    service = await BotsAPI.get_service(data['service_id'])
+    service_name = service['name'] if service else f"Услуга #{data['service_id']}"
+    
+    await callback.message.edit_text(
+        f"✅ <b>Заказ #{order_id} успешно создан!</b>\n\n"
+        f"• Услуга: {service_name}\n"
+        f"• Ссылка: {data['link']}\n"
+        f"• Количество: {data['quantity']}\n"
+        f"• Стоимость: {amount} руб.\n\n"
+        f"Статус заказа можно проверить командой /orders",
+        parse_mode="HTML"
+    )
+    
+    await state.clear()
+
+# Обработчик отмены платежа
+@bots.callback_query(F.data == "cancel_payment", OrderStates.AWAITING_PAYMENT)
+async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("❌ Оплата отменена")
+    await state.clear()
+    await callback.answer()
+
 # Обработчик команды /orders
 @bots.message(Command("orders"))
 async def show_orders(message: types.Message, state: FSMContext):
-    # Здесь должна быть логика получения заказов пользователя из БД
-    # Для примера будем использовать временное хранилище
     user_orders = await DB.get_user_orders(message.from_user.id)
     
     if not user_orders:
@@ -497,6 +789,7 @@ async def view_order(callback: types.CallbackQuery):
         f"• Ссылка: {order['link']}\n"
         f"• Количество: {order['quantity']}\n"
         f"• Стоимость: {order['cost']} руб.\n"
+        # f"• Способ оплаты: {order.get('payment_method', 'не указан')}\n"
         f"• Статус: {current_status.upper()}\n"
         f"Дата: {order['created_at']}"
     )
@@ -543,6 +836,7 @@ async def refresh_order_status(callback: types.CallbackQuery):
         f"• Ссылка: {order['link']}\n"
         f"• Количество: {order['quantity']}\n"
         f"• Стоимость: {order['cost']} руб.\n"
+        f"• Способ оплаты: {order.get('payment_method', 'не указан')}\n"
         f"• Статус: {status_data['status'].upper()}\n"
         f"Дата: {order['created_at']}"
     )
@@ -559,55 +853,30 @@ async def refresh_order_status(callback: types.CallbackQuery):
     )
     await callback.answer("✅ Статус обновлен")
 
-# Обработчик возврата к списку заказов
+async def render_orders_list(user_id: int, state: FSMContext) -> types.Message | None:
+    user_orders = await DB.get_user_orders(user_id)
+
+    if not user_orders:
+        return None
+
+    builder = InlineKeyboardBuilder()
+    for order in user_orders[:10]:
+        builder.button(
+            text=f"Заказ #{order['order_id']} - {order['status']}",
+            callback_data=f"view_order_{order['order_id']}"
+        )
+    builder.adjust(1)
+    return builder
 @bots.callback_query(F.data == "back_to_orders")
 async def back_to_orders_list(callback: types.CallbackQuery, state: FSMContext):
-    await show_orders(callback.message, state)
+    builder = await render_orders_list(callback.from_user.id, state)
+    if not builder:
+        await callback.message.edit_text("📭 У вас пока нет заказов")
+    else:
+        await callback.message.edit_text(
+            "📋 <b>Ваши заказы:</b>",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    await state.set_state(OrderStates.VIEW_ORDERS)
     await callback.answer()
-
-# Обновим метод создания заказа для сохранения в БД
-@bots.callback_query(F.data == "confirm_order")
-async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    
-    # Создаем заказ в API
-    order_result = await BotsAPI.create_order(
-        service_id=data['service_id'],
-        link=data['link'],
-        quantity=data['quantity']
-    )
-    
-    if not order_result or 'order' not in order_result:
-        await callback.message.edit_text("❌ Ошибка при создании заказа. Попробуйте позже.")
-        await state.clear()
-        return
-    
-    # Сохраняем заказ в БД
-    order_id = order_result['order']
-    await DB.add_order(
-        user_id=callback.from_user.id,
-        order_id=order_id,
-        service_id=data['service_id'],
-        link=data['link'],
-        quantity=data['quantity'],
-        cost=data['cost'],
-        status='pending'  # Начальный статус
-    )
-    
-    # Получаем информацию об услуге для красивого отображения
-    service = await BotsAPI.get_service(data['service_id'])
-    service_name = service['name'] if service else f"Услуга #{data['service_id']}"
-    
-    await callback.message.edit_text(
-        f"✅ <b>Заказ #{order_id} успешно создан!</b>\n\n"
-        f"• Услуга: {service_name}\n"
-        f"• Ссылка: {data['link']}\n"
-        f"• Количество: {data['quantity']}\n"
-        f"• Стоимость: {data['cost']} руб.\n\n"
-        f"Статус заказа можно проверить командой /orders",
-        parse_mode="HTML"
-    )
-    
-    await state.clear()
-    await callback.answer()
-    

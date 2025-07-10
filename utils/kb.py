@@ -31,12 +31,15 @@ def admin_kb2():
     """Главное меню админ-панели"""
     ikb = InlineKeyboardBuilder()
     
+
     buttons = [
         ('🎁 Создать промокод', 'promocreate'),
         ('✏️ Изменить цену продажи звёзд', 'editSellCurrency'), 
         ('Создать конкурс', 'admin_contest'), 
-        ('◀️ Назад', 'admin_kb')  
+        (f"🛠 Тех. перерыв", 'toggle_break'),
+        ('◀️ Назад', 'admin_kb')
     ]
+
     
     for text, callback_data in buttons:
         ikb.button(text=text, callback_data=callback_data)
@@ -100,8 +103,10 @@ def select_deposit_menu_kb(user_id):
     ikb.button(text="🌟 Telegram Stars", callback_data="dep_stars_menu")
     ikb.button(text="🤖 CryptoBot", callback_data="deposit_menu")
     ikb.button(text="💰 Рубли", callback_data="rub_donate")
+    ikb.button(text=f"💎 TON", callback_data=f'ton_deposit')
+
     ikb.button(text="🔙 Назад", callback_data="profile")
-    ikb.adjust(1)
+    ikb.adjust(2, 2, 1)
     return ikb.as_markup()
 
 def profile_kb():

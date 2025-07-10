@@ -454,10 +454,18 @@ class DataBase:
                     conditions TEXT NOT NULL,  -- JSON список условий
                     contest_text TEXT,
                     image_path TEXT,
-                    status TEXT NOT NULL,  -- planned, active, finished
+                    status TEXT NOT NULL,  -- waiting, active, finished, recurring
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     message_id INTEGER,
-                    message_text TEXT
+                    message_text TEXT,
+                    -- Поля для регулярных конкурсов
+                    frequency TEXT,  -- once, daily, weekly
+                    selected_days TEXT,  -- JSON массив дней недели [1,3,5] (1-Пн, 7-Вс)
+                    total_occurrences INTEGER DEFAULT 1,
+                    current_occurrence INTEGER DEFAULT 1,
+                    start_time TEXT,  -- Время начала в формате "HH:MM"
+                    last_run TEXT,  -- Дата последнего запуска
+                    parent_contest_id INTEGER  -- ID родительского конкурса для клонов
                 )
             ''')
 
@@ -530,6 +538,18 @@ class DataBase:
                 ON tasks(type, amount)
             ''')
                 
+
+            await cur.execute('''
+                CREATE TABLE IF NOT EXISTS break (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    status INTEGER DEFAULT 0
+                )
+            ''')
+            
+            await cur.execute('''
+                INSERT OR IGNORE INTO break (id, status)
+                VALUES (1, 1)
+            ''') 
             await self.con.commit()
 
 

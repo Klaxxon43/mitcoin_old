@@ -12,6 +12,14 @@ async def checks_menu(callback: types.CallbackQuery, bot: Bot):
     channels = await DB.all_channels_op()
     not_subscribed = []
 
+    from handlers.client.client import check_subs_op
+    if not await check_subs_op(user_id, bot):
+        return
+    
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
+    
     for channel in channels:
         channel_id = channel[0]
         try:

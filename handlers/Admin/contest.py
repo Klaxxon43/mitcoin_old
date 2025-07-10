@@ -103,7 +103,7 @@ async def process_prize_amount(message: types.Message, state: FSMContext):
         
         # Проверяем, все ли награды установлены
         if len(prizes) == data["winners_count"]:
-            await ask_start_date(message, state)
+            await ask_contest_frequency(message, state)  # Изменено с ask_start_date
         else:
             # Продолжаем устанавливать награды
             kb = InlineKeyboardBuilder()
@@ -525,10 +525,15 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
         
         # Определяем статус конкурса
         start_date = data.get("start_date")
-        if start_date == "сразу" or start_date == datetime.now().strftime("%d.%m.%Y %H:%M"):
-            status = "active"
+        frequency = data.get("frequency", "once")
+        
+        if frequency == "once":
+            if start_date == "сразу" or start_date == datetime.now().strftime("%d.%m.%Y %H:%M"):
+                status = "active"
+            else:
+                status = "waiting"
         else:
-            status = "waiting"
+            status = "recurring"
         
         # Формируем данные конкурса
         contest_data = {
@@ -540,21 +545,15 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
             "conditions": json.dumps(conditions, ensure_ascii=False),
             "contest_text": data.get("contest_text", ""),
             "image_path": data.get("image_path"),
-            "status": status
+            "status": status,
+            "frequency": frequency,
+            "selected_days": list(data.get("selected_days", [])),
+            "total_occurrences": data.get("total_occurrences", 1),
+            "current_occurrence": 1
         }
 
         # Сохраняем конкурс в базу данных
-        contest_id = await Contest.create_contest(
-            channel_url=contest_data["channel_url"],
-            winners_count=contest_data["winners_count"],
-            prizes=json.dumps(contest_data["prizes"], ensure_ascii=False),
-            start_date=contest_data["start_date"],
-            end_date=contest_data["end_date"],
-            conditions=contest_data["conditions"],
-            contest_text=contest_data["contest_text"],
-            image_path=contest_data["image_path"],
-            status=contest_data["status"]
-        )
+        contest_id = await Contest.create_recurring_contest(**contest_data)
         
         # Если конкурс активный - публикуем сразу
         if status == "active":
@@ -607,12 +606,19 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
                 print(error_msg)
                 await callback.answer(error_msg, show_alert=True)
         else:
-            await callback.answer(
-                f"⏳ Конкурс запланирован на {contest_data['start_date']}. "
-                "Он будет автоматически опубликован в указанное время.",
-                show_alert=True
-            )
-            
+            if frequency == "once":
+                await callback.answer(
+                    f"⏳ Конкурс запланирован на {contest_data['start_date']}. "
+                    "Он будет автоматически опубликован в указанное время.",
+                    show_alert=True
+                )
+            else:
+                await callback.answer(
+                    "✅ Регулярный конкурс успешно создан! "
+                    "Он будет автоматически публиковаться по расписанию.",
+                    show_alert=True
+                )
+                
     except Exception as e:
         error_msg = f"❌ Критическая ошибка при создании конкурса: {str(e)}"
         print(error_msg)
@@ -1146,3 +1152,204 @@ async def activate_contest(contest: dict, bot: Bot):
     except Exception as e:
         print(f"Неизвестная ошибка при активации конкурса {contest['id']}: {e}")
         await Contest.update_contest_status(contest['id'], 'error')
+
+
+
+
+
+
+
+async def ask_contest_frequency(message: types.Message, state: FSMContext):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Одноразовый", callback_data="frequency_once")
+    kb.button(text="Ежедневный", callback_data="frequency_daily")
+    kb.button(text="Еженедельный", callback_data="frequency_weekly")
+    kb.adjust(1)
+    
+    await message.answer(
+        "Выберите частоту проведения конкурса:",
+        reply_markup=kb.as_markup()
+    )
+    await state.set_state(CreateContest.contest_frequency)
+
+@admin.callback_query(F.data.startswith("frequency_"), CreateContest.contest_frequency)
+async def process_frequency(callback: types.CallbackQuery, state: FSMContext):
+    frequency = callback.data.split("_")[1]
+    await state.update_data(frequency=frequency)
+    
+    if frequency == "once":
+        await ask_start_date(callback.message, state)
+    elif frequency == "daily":
+        await callback.message.answer(
+            "Введите количество дней, в течение которых будет повторяться конкурс:"
+        )
+        await state.set_state(CreateContest.total_occurrences)
+    elif frequency == "weekly":
+        await ask_days_of_week(callback.message, state)
+
+async def ask_days_of_week(message: types.Message, state: FSMContext):
+    kb = InlineKeyboardBuilder()
+    days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    for i, day in enumerate(days, 1):
+        kb.button(text=day, callback_data=f"day_{i}")
+    kb.button(text="✅ Готово", callback_data="days_done")
+    kb.adjust(7)
+    
+    await message.answer(
+        "Выберите дни недели для проведения конкурса:",
+        reply_markup=kb.as_markup()
+    )
+    await state.set_state(CreateContest.days_of_week)
+
+@admin.callback_query(F.data.startswith("day_"), CreateContest.days_of_week)
+async def toggle_day(callback: types.CallbackQuery, state: FSMContext):
+    day_num = int(callback.data.split("_")[1])
+    data = await state.get_data()
+    selected_days = data.get("selected_days", set())
+    
+    if day_num in selected_days:
+        selected_days.remove(day_num)
+    else:
+        selected_days.add(day_num)
+    
+    await state.update_data(selected_days=selected_days)
+    await callback.answer(f"День {day_num} {'добавлен' if day_num in selected_days else 'удален'}")
+
+@admin.callback_query(F.data == "days_done", CreateContest.days_of_week)
+async def days_selected(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if not data.get("selected_days"):
+        await callback.answer("Выберите хотя бы один день", show_alert=True)
+        return
+    
+    await callback.message.answer(
+        "Введите количество недель, в течение которых будет повторяться конкурс:"
+    )
+    await state.set_state(CreateContest.total_occurrences)
+
+@admin.message(CreateContest.total_occurrences)
+async def process_total_occurrences(message: types.Message, state: FSMContext):
+    try:
+        occurrences = int(message.text)
+        if occurrences <= 0:
+            raise ValueError
+        await state.update_data(total_occurrences=occurrences)
+        await ask_start_date(message, state)
+    except ValueError:
+        await message.answer("Пожалуйста, введите корректное положительное число!")
+
+
+async def check_recurring_contests(bot: Bot):
+    """Проверяет и запускает регулярные конкурсы по расписанию"""
+    while True:
+        try:
+            now = datetime.now()
+            current_time = now.strftime("%H:%M")
+            current_weekday = now.weekday() + 1  # 1-7, где 1-пн, 7-вс
+            
+            # Получаем активные регулярные конкурсы
+            recurring_contests = await Contest.get_active_recurring_contests()
+            
+            for contest in recurring_contests:
+                contest_id = contest['id']
+                frequency = contest['frequency']
+                start_time = contest['start_time']  # В формате "HH:MM"
+                selected_days = contest['selected_days'] or []
+                last_run = contest['last_run']
+                current_occurrence = contest['current_occurrence']
+                total_occurrences = contest['total_occurrences']
+                
+                # Проверяем, нужно ли запускать конкурс сегодня
+                should_run = False
+                
+                if frequency == "daily":
+                    # Для ежедневных - проверяем время
+                    should_run = current_time == start_time
+                    
+                elif frequency == "weekly":
+                    # Для еженедельных - проверяем день недели и время
+                    should_run = (current_weekday in selected_days and 
+                                current_time == start_time)
+                
+                # Проверяем, не превышено ли количество запусков
+                if current_occurrence >= total_occurrences:
+                    await Contest.update_contest_status(contest_id, "finished")
+                    continue
+                
+                # Проверяем, не запускали ли уже сегодня
+                if last_run and last_run.date() == now.date():
+                    continue
+                
+                if should_run:
+                    try:
+                        # Клонируем конкурс для нового запуска
+                        new_contest_id = await Contest.clone_contest_for_recurring_run(contest_id)
+                        
+                        # Публикуем конкурс
+                        await publish_recurring_contest(bot, contest, new_contest_id)
+                        
+                        # Обновляем данные оригинального конкурса
+                        await Contest.update_recurring_contest_after_run(
+                            contest_id, 
+                            current_occurrence + 1,
+                            now
+                        )
+                        
+                    except Exception as e:
+                        print(f"Ошибка при запуске регулярного конкурса {contest_id}: {e}")
+            
+            await asyncio.sleep(60)  # Проверяем каждую минуту
+            
+        except Exception as e:
+            print(f"Критическая ошибка в check_recurring_contests: {e}")
+            await asyncio.sleep(300)  # При ошибке ждем 5 минут
+
+async def publish_recurring_contest(bot: Bot, contest_data: dict, contest_id: int):
+    """Публикует регулярный конкурс в канале"""
+    try:
+        # Формируем текст конкурса
+        conditions = json.loads(contest_data['conditions'])
+        contest_text = await generate_contest_text(contest_data, conditions)
+        
+        # Создаем кнопку "Участвовать"
+        bot_username = (await bot.get_me()).username
+        participate_kb = InlineKeyboardBuilder()
+        participate_kb.button(
+            text="🎁 Участвовать", 
+            url=f"https://t.me/{bot_username}?start=contest_{contest_id}"
+        )
+        
+        # Получаем username канала
+        channel_url = contest_data['channel_url']
+        channel_username = channel_url.replace("@", "").replace("https://t.me/", "")
+        
+        # Проверяем наличие изображения
+        image_path = contest_data.get('image_path')
+        
+        if image_path and os.path.exists(image_path):
+            with open(image_path, 'rb') as photo:
+                # Отправляем сообщение с фото
+                message = await bot.send_photo(
+                    chat_id=f"@{channel_username}",
+                    photo=types.BufferedInputFile(photo.read(), filename="contest.jpg"),
+                    caption=contest_text,
+                    reply_markup=participate_kb.as_markup(),
+                    parse_mode="HTML"
+                )
+        else:
+            # Отправляем текстовое сообщение
+            message = await bot.send_message(
+                chat_id=f"@{channel_username}",
+                text=contest_text,
+                reply_markup=participate_kb.as_markup(),
+                parse_mode="HTML"
+            )
+        
+        # Сохраняем данные сообщения
+        await Contest.update_contest_message_id(contest_id, message.message_id)
+        await Contest.update_contest_message_text(contest_id, contest_text)
+        await Contest.update_contest_status(contest_id, "active")
+        
+    except Exception as e:
+        print(f"Ошибка при публикации регулярного конкурса: {e}")
+        await Contest.update_contest_status(contest_id, "error")

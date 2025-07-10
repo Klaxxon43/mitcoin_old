@@ -6,6 +6,9 @@ HOST='0.0.0.0'
 PORT=8000
 BASE_URL='efnejrnerj' #можно через ngrok
 WEBHOOK_PATH = f'/{API_TOKEN}'
+TON_API_BASE = "https://toncenter.com/api/v2/"
+TON_API_TOKEN = "f8e79e787c66fbb7a10ef3e2456151e9e3c3f5b74e6231b85ba08be5a9d5359b"  # Замени на реальный API ключ от TON Center
+TON_WALLET = "UQBKc7lifQe_U4cUibpyY5J5AQF7hRIPXIJZvuohf0x4E1n1"  # Адрес кошелька для приема платежей
 from API.StreamPromotionAPI import StreamPromotionAPI
 BotsAPI = StreamPromotionAPI("Cxqup7n2Ca3dh1bbhBM4WoK89k7XMJ83")
 

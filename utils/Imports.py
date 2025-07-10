@@ -1,5 +1,5 @@
 # Стандартные библиотеки
-import os, asyncio, logging, random, uuid, sys, traceback, time, emoji, re, pytz, requests, json, copy
+import os, asyncio, logging, random, uuid, sys, traceback, time, emoji, re, pytz, requests, json, copy, string
 from datetime import datetime
 from pathlib import Path
 from aiocryptopay import AioCryptoPay, Networks
@@ -11,7 +11,7 @@ from typing import Union, Dict, List, Any, Optional
 from aiogram import Bot, F, types, Router, Dispatcher
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.enums import ChatMemberStatus, ChatType
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -32,7 +32,7 @@ from aiogram.types import (
 # Локальные модули
 from datebase.db import DB, Promo, Contest, Boost
 from utils.kb import *
-from config import CRYPTOBOT_TOKEN, ADMINS_ID
+from config import CRYPTOBOT_TOKEN, ADMINS_ID, BotsAPI, TON_WALLET, TON_API_TOKEN, TON_API_BASE
 from threading import Lock
 from datetime import timedelta
 from PIL import Image, ImageDraw, ImageFont

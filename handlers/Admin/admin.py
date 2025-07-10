@@ -75,3 +75,28 @@ async def view_user_profile_handler(callback: types.CallbackQuery, state: FSMCon
 #         f'Всего пользователей: {total_users}\n'
 #         f'Premium пользователей: {premium_users}'
 #     ) 
+
+
+@admin.callback_query(F.data == "toggle_break")
+async def toggle_break_handler(callback: types.CallbackQuery):
+    current_status = await DB.get_break_status()
+    await DB.update_break_status(current_status)
+
+    new_status = await DB.get_break_status()
+    status_text = "🟢 ВКЛ" if new_status else "🔴 ВЫКЛ"
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=f"🛠 Тех. перерыв: {status_text}",
+        callback_data="toggle_break"
+    )
+    builder.button(text="◀️ Назад", callback_data="back_to_main")
+    builder.adjust(1)
+
+    await callback.message.edit_text(
+        f"<b>⚙️ Админ-панель</b>\n\n"
+        f"Технический перерыв теперь: {status_text}",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer("✅ Статус обновлён")

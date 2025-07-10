@@ -12,6 +12,15 @@ MIN_MINIG_TIME_MINUTES = 5  # Минимальное время для сбор�
 @mining.callback_query(F.data == 'mining')
 async def mining_menu(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
+
+    from handlers.client.client import check_subs_op
+    if not await check_subs_op(user_id, bot):
+        return
+    
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
+    
     mining_data = await DB.search_mining(user_id)
 
     if mining_data:

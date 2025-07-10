@@ -3,15 +3,6 @@ import asyncio
 import time
 from config import CRYPTOBOT_TOKEN
 
-# Глобальная переменная для клиента CryptoPay
-crypto = None
-
-async def init_crypto():
-    """Инициализация AioCryptoPay"""
-    global crypto
-    if crypto is None:
-        crypto = AioCryptoPay(token=CRYPTOBOT_TOKEN)
-    return crypto
 
 async def create_invoice(amount: float, purpose='', asset: str = 'USDT') -> dict:
     """
@@ -22,6 +13,8 @@ async def create_invoice(amount: float, purpose='', asset: str = 'USDT') -> dict
     :return: Словарь с данными счета (invoice_id, bot_invoice_url, expires_in)
     """
     try:
+        crypto = AioCryptoPay(token=CRYPTOBOT_TOKEN)
+
         invoice = await crypto.create_invoice(
             amount=amount,
             description=purpose,
@@ -49,6 +42,8 @@ async def create_check(amount: float, user_id: int, asset: str = 'USDT') -> dict
     :return: Словарь с данными чека (check_id, bot_check_url)
     """
     try:
+        crypto = AioCryptoPay(token=CRYPTOBOT_TOKEN)
+
         check = await crypto.create_check(
             amount=amount,
             asset=asset,
@@ -74,6 +69,8 @@ async def check_payment_status(invoice_id: int, purpose = '', timeout: int = 180
     :return: True если оплачено, False если не оплачено или время истекло
     """
     try:
+        crypto = AioCryptoPay(token=CRYPTOBOT_TOKEN)
+
         invoice = await crypto.get_invoices(invoice_ids=invoice_id)
         
         if invoice.status == 'paid':
@@ -86,6 +83,7 @@ async def check_payment_status(invoice_id: int, purpose = '', timeout: int = 180
 # Пример использования
 async def main():
     # Создание счета
+    crypto = AioCryptoPay(token=CRYPTOBOT_TOKEN)
     invoice = await create_invoice(10.50, 123456)
     if invoice:
         print(f"Счет создан: {invoice['payment_url']}")

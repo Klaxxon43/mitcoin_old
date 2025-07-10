@@ -1,4 +1,4 @@
-import aiosqlite
+import aiosqlite, json
 from datetime import datetime
 import pytz
 from aiocron import crontab
@@ -1054,6 +1054,17 @@ class DataBase:
                                 (username, )) 
             id = await cur.fetchone() 
             return id  
+
+    async def get_break_status(self):
+        async with self.con.execute('SELECT status FROM break LIMIT 1') as cursor:
+            res = await cursor.fetchone()
+            return res[0] if res else 0
+
+    async def update_break_status(self, current_status: int):
+        new_status = 0 if current_status else 1
+        async with self.con.cursor() as cur:
+            await cur.execute('UPDATE break SET status = ?', (new_status,))
+            await self.con.commit()
 
     # БАЛАНС
 
@@ -2782,7 +2793,93 @@ class Contest:
             ''', (contest_id,))
             return await cur.fetchall()
 
+    @staticmethod
+    async def create_recurring_contest(**data) -> int:
+        """Создает новый повторяющийся конкурс и возвращает его ID"""
+        query = """
+        INSERT INTO contests (
+            channel_url, winners_count, prizes, start_date, end_date, 
+            conditions, contest_text, image_path, status, frequency,
+            selected_days, total_occurrences, current_occurrence, start_time
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        try:
+            start_time = datetime.strptime(data['start_date'], "%d.%m.%Y %H:%M").strftime("%H:%M")
+            selected_days = json.dumps(data.get('selected_days', []))
+            
+            async with DB.con.cursor() as cur:
+                await cur.execute(query, (
+                    data['channel_url'], 
+                    data['winners_count'], 
+                    json.dumps(data['prizes']),
+                    data['start_date'], 
+                    data['end_date'], 
+                    data['conditions'],
+                    data.get('contest_text'), 
+                    data.get('image_path'), 
+                    data['status'],
+                    data.get('frequency', 'once'), 
+                    selected_days,
+                    data.get('total_occurrences', 1), 
+                    1,  # current_occurrence
+                    start_time
+                ))
+                await cur.execute("SELECT last_insert_rowid()")
+                return (await cur.fetchone())[0]
+        except Exception as e:
+            print(f"Ошибка при создании конкурса: {e}")
+            raise
 
+    @staticmethod
+    async def get_active_recurring_contests() -> list:
+        """Получает активные повторяющиеся конкурсы"""
+        query = """
+        SELECT * FROM contests 
+        WHERE status = 'recurring' 
+        AND current_occurrence < total_occurrences
+        """
+        async with DB.con.cursor() as cur:
+            await cur.execute(query)
+            return await cur.fetchall()
+
+    @staticmethod
+    async def clone_contest_for_recurring_run(contest_id: int) -> int:
+        """Клонирует конкурс для нового запуска и возвращает ID нового конкурса"""
+        query = """
+        INSERT INTO contests (
+            channel_url, winners_count, prizes, start_date, end_date, 
+            conditions, contest_text, image_path, status, frequency,
+            selected_days, total_occurrences, current_occurrence, start_time,
+            parent_contest_id
+        )
+        SELECT 
+            channel_url, winners_count, prizes, 
+            date('now') || ' ' || start_time as start_date,
+            date('now', '+' || (julianday(end_date) - julianday(start_date)) || ' days') as end_date,
+            conditions, contest_text, image_path, 'waiting', frequency,
+            selected_days, total_occurrences, current_occurrence, start_time,
+            id
+        FROM contests WHERE id = ?
+        """
+        try:
+            async with DB.con.cursor() as cur:
+                await cur.execute(query, (contest_id,))
+                await cur.execute("SELECT last_insert_rowid()")
+                return (await cur.fetchone())[0]
+        except Exception as e:
+            print(f"Ошибка при клонировании конкурса: {e}")
+            raise
+
+    @staticmethod
+    async def update_recurring_contest_after_run(contest_id: int, current_occurrence: int, last_run: datetime) -> None:
+        """Обновляет данные после запуска повторяющегося конкурса"""
+        query = """
+        UPDATE contests 
+        SET current_occurrence = ?, last_run = ?
+        WHERE id = ?
+        """
+        async with DB.con.cursor() as cur:
+            await cur.execute(query, (current_occurrence, last_run, contest_id))
 
 
 class Boost():

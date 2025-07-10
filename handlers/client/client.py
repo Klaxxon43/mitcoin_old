@@ -36,6 +36,10 @@ async def profile_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     if not await check_subs_op(user_id, bot):
         return
+    
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
     else:
 
         user_id = callback.from_user.id
@@ -106,6 +110,10 @@ async def cancel_all(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
 async def stats_menu_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     if not await check_subs_op(user_id, bot):
+        return
+    
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     else:
 
@@ -188,6 +196,11 @@ async def refki_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     if not await check_subs_op(user_id, bot):
         return
+    
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
+    
     else:
         await callback.answer()
         roadmap = "https://telegra.ph/Dorozhnaya-karta-proekta-Mit-Coin--Mit-Coin-Project-Roadmap-11-25"
@@ -228,6 +241,11 @@ async def refki_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     if not await check_subs_op(user_id, bot):
         return
+    
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
+    
     else:
 
         await callback.answer()
@@ -250,6 +268,11 @@ async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
     user_id = callback.from_user.id
     if not await check_subs_op(user_id, bot):
         return
+
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
+    
     else:
         await callback.answer()
         user_id = callback.from_user.id
@@ -366,9 +389,9 @@ async def outputmenu(callback: types.CallbackQuery, state: FSMContext):
     rub_balance = user['rub_balance']
 
     add_button1 = InlineKeyboardButton(text=f"💲 USDT", callback_data=f'usdt_output_menu')
-    add_button3 = InlineKeyboardButton(text=f"Рубли (только для РФ)", callback_data=f'rub_output_menu')
-    add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='profile')
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button3], [add_button2]])
+    add_button2 = InlineKeyboardButton(text=f"RUB", callback_data=f'rub_output_menu') 
+    add_button3 = InlineKeyboardButton(text="🔙 Назад", callback_data='profile')
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button2], [add_button3]])
     await callback.message.edit_text(f'''
 ⚡ В данном разделе Вы можете произвести вывод ваших средств с баланса в рублях <i>(рубли можно получить при помощи конвертации)</i>
 
@@ -559,6 +582,10 @@ async def convertation_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
 
     if not await check_subs_op(user_id, bot):
+        return
+
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
 
     # Проверка конвертации
@@ -1117,6 +1144,10 @@ async def works_handler(callback: types.CallbackQuery, bot: Bot):
     if not await check_subs_op(user_id, bot):
         return
 
+    if not await DB.get_break_status():
+        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
+    
     await callback.answer()
 
     temp_message = await callback.message.edit_text(
@@ -1674,6 +1705,11 @@ async def start(message: types.Message, bot: Bot):
     user_id = message.from_user.id
     if not await check_subs_op(user_id, bot):
         return
+    
+    if not await DB.get_break_status():
+        await message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
+    
     else:
         # Если пользователь подписан на все каналы
         await message.answer("Добро пожаловать! Вы подписаны на все каналы.")

@@ -7,6 +7,10 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
     user_id = message.from_user.id
     username = message.from_user.username
     
+    if not await DB.get_break_status():
+        await message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+        return
+    
     # 1. Проверка на участие в конкурсе
     args = message.text.split()
     if len(args) > 1:

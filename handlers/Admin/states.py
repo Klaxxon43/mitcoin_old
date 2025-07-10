@@ -64,6 +64,10 @@ class CreateContest(StatesGroup):
     conditions = State()
     channel_sub_input = State()
 
+    contest_frequency = State()  # Для выбора частоты конкурса
+    days_of_week = State()      # Для выбора дней недели (если еженедельный)
+    total_occurrences = State() # Сколько раз повторять конкурс
+
 class EditChannelStates(StatesGroup):
     waiting_for_name = State()
     waiting_for_username = State()

@@ -1,39 +1,5 @@
-# Стандартные библиотеки
-import os, asyncio, logging, random, uuid, sys, traceback
-from datetime import datetime
-from pathlib import Path
-import pytz, requests
-from aiocryptopay import AioCryptoPay, Networks
-from cachetools import TTLCache
+from utils.Imports import *
 
-# Aiogram основные компоненты
-from aiogram import Bot, F, types, Router, Dispatcher
-from aiogram.exceptions import TelegramBadRequest
-from aiogram.enums import ChatMemberStatus, ChatType
-from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.enums.dice_emoji import DiceEmoji
-from aiogram.types import InlineQueryResultArticle, InputTextMessageContent
-
-# Aiogram типы
-from aiogram.types import (
-    InlineKeyboardMarkup, InlineKeyboardButton,
-    FSInputFile, InputMediaPhoto, ChatMemberUpdated,
-    ContentType, LabeledPrice, PreCheckoutQuery,
-    BufferedInputFile, Chat
-)
-
-# Локальные модули
-from datebase.db import DB, Promo
-from utils.kb import (
-    menu_kb, back_menu_kb, profile_kb, pr_menu_kb,
-    pr_menu_canc, work_menu_kb, back_work_menu_kb,
-    back_profile_kb, select_deposit_menu_kb,
-    back_dep_kb, cancel_all_kb
-)
-from config import CRYPTOBOT_TOKEN, ADMINS_ID
 import API.usd as usd, time
 
 logging.basicConfig(level=logging.INFO)
