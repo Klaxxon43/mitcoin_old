@@ -107,6 +107,10 @@ async def check_all_active_boosts(bot: Bot):
                                 f"✅ Один из пользователей закончил {task_data['total_days']}-дневный буст вашего канала"
                             )
 
+                    elif task_type == 'daily_boost_reward':
+                        await handle_daily_boost_reward(bot, task_data)
+
+
                 except Exception as e:
                     print(f"[BG TASK ERROR] Ошибка при выполнении задачи {task_id}: {str(e)}")
                     continue
@@ -187,6 +191,25 @@ async def restore_background_tasks(bot: Bot):
         print(f"[BG TASK ERROR] Критическая ошибка при восстановлении задач: {e}")
     finally:
         print("[BG TASK] Восстановление задач завершено")
+
+
+async def handle_daily_boost_reward(bot: Bot, task_data: dict):
+    user_id = task_data['user_id']
+    chat_id = task_data['chat_id']
+
+    is_active = await Boost.has_user_boosted(user_id, chat_id)
+    if not is_active:
+        return  # буст снят — не платим и не продлеваем
+
+    await DB.add_balance(user_id, 10000)
+    await bot.send_message(user_id, "🔥 Спасибо, что продолжаешь бустить наш канал! +10 000 MITcoin")
+
+    # Повторно ставим задачу на следующий день
+    await DB.add_bg_task(
+        task_type='daily_boost_reward',
+        task_data=task_data,
+        delay_seconds=86400
+    )
 
 
 async def start_background_tasks(bot: Bot, DB):

@@ -13,14 +13,8 @@ class withdraw_stars(StatesGroup):
 @stars.callback_query(F.data == "withdraw_stars")
 async def withdraw_stars_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     user_id = callback.from_user.id
-    
-    from handlers.client.client import check_subs_op
-    if not await check_subs_op(user_id, bot):
-        return
-    
-    if not await DB.get_break_status():
-        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
-        return
+
+
     
     await state.set_state(withdraw_stars.amount)
     kb = InlineKeyboardBuilder()

@@ -1,7 +1,8 @@
 from utils.Imports import *
 from utils.redis_utils import *
 from handlers.client.states import *
-# from handlers.Checks.menu import *
+
+router = Router()
 
 from handlers.Tasks.channel import generate_tasks_keyboard_chanel
 from handlers.Tasks.tasks import *
@@ -11,10 +12,11 @@ from handlers.Tasks.reaction import *
 from handlers.Tasks.link import *
 from handlers.Tasks.boost import *
 
+# from handlers.Checks.menu import router
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-router = Router()
 
 task_cache = {}
 task_cache_chat = {}
@@ -37,11 +39,10 @@ async def profile_handler(callback: types.CallbackQuery, bot: Bot):
     if not await check_subs_op(user_id, bot):
         return
     
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     else:
-
         user_id = callback.from_user.id
         user = await DB.select_user(user_id)
         print(user)
@@ -50,10 +51,6 @@ async def profile_handler(callback: types.CallbackQuery, bot: Bot):
         if balance is None:
             balance = 0
         await callback.answer()
-        # if user['prem'] == True: 
-        #     prem = 'Есть'
-        # else:
-        #     prem = 'Нету' 
 
         stars = await DB.get_stars(user_id)
         await callback.message.edit_text(f'''
@@ -70,7 +67,6 @@ async def profile_handler(callback: types.CallbackQuery, bot: Bot):
 🚀 Выполнено заданий за сегодня: {(await DB.get_task_counts(user_id))[0]}
         ''', reply_markup=profile_kb()) 
 
-
 @router.callback_query(F.data == 'back_menu')
 async def back_menu_handler(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -80,7 +76,6 @@ async def back_menu_handler(callback: types.CallbackQuery, state: FSMContext):
         "<b>💎 PR MIT</b> - <em>мощный и уникальный инструмент для рекламы ваших проектов</em>\n\n<b>Главное меню</b>",
         reply_markup=menu_kb(user_id))
 
-
 @router.callback_query(F.data == 'rasslka_menu')
 async def back_menu_handler(callback: types.CallbackQuery):
     user_id = callback.from_user.id
@@ -88,7 +83,6 @@ async def back_menu_handler(callback: types.CallbackQuery):
     await callback.message.edit_text(
         "Рассылка в боте - 1000 рублей, обращаться - @Coin_var",
         reply_markup=back_menu_kb(user_id))
-
 
 @router.callback_query(F.data == 'op_piar_menu')
 async def back_menu_handler(callback: types.CallbackQuery):
@@ -98,13 +92,10 @@ async def back_menu_handler(callback: types.CallbackQuery):
         "Реклама в ОП - 500 рублей за 1 день, обращаться - @Coin_var",
         reply_markup=back_menu_kb(user_id))
 
-
 @router.callback_query(F.data == 'cancel_all')
 async def cancel_all(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     await state.clear()
     await profile_handler(callback, bot)
-
-
 
 @router.callback_query(F.data == 'menu_stats')
 async def stats_menu_handler(callback: types.CallbackQuery, bot: Bot):
@@ -112,37 +103,31 @@ async def stats_menu_handler(callback: types.CallbackQuery, bot: Bot):
     if not await check_subs_op(user_id, bot):
         return
     
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     else:
-
         user_count = len(await DB.select_all())
-        # all_tasks = len(await DB.get_tasks())
         calculate_total_cost = await DB.calculate_total_cost()
         statics = await DB.get_statics() 
         id, chanels, groups, all, see, users, _, gift2, boosts, reactions, links, comments, mined, _, _, _, _, _, _, _, _ = statics[0]
         id2, chanels2, groups2, all2, see2, users, _, gift, boosts2, reactions2, links2, comments2, mined2, _, _, _, _, _, _, _, _ = statics[1] 
         balance = await DB.all_balance() 
         gifts = await DB.count_bonus_time_rows()
-        today_gifts = await DB.count_today_gifts()  # Количество подарков за сегодня
+        today_gifts = await DB.count_today_gifts()
         comment_stats = len(await DB.select_like_comment())
+
+        # Получаем количество заданий
+        task_types = ['channel', 'chat', 'post', 'comment', 'reaction', 'link', 'boost']
+        counts = {key: 0 for key in task_types}
         
+        for task_type in task_types:
+            cached = await RedisTasksManager.get_cached_tasks(task_type)
+            counts[task_type] = len(cached or [])
 
-        cha1 = len(task_cache.get('all_tasks', [])) #chanel
-        cha2 = len(task_cache_chat.get('all_tasks', []))  #chats       
-        pos = len(processed_tasks)
-        com= comment_stats
-        rea = len(available_reaction_tasks)
-        lin = len(available_tasks)
-        boo = len(available_boost_tasks)
+        all_tasks = sum(counts.values())
 
-        all_tasks = cha1+cha2+pos+com+rea+lin+boo
-
-        # prem_users = await DB.scount_premium_user() 
-
-        all_minings = await  DB.get_mining_line()
- 
+        all_minings = await DB.get_mining_line()
 
         text = f""" 
         
@@ -183,13 +168,11 @@ async def stats_menu_handler(callback: types.CallbackQuery, bot: Bot):
     """
         build = InlineKeyboardBuilder()
         build.add(InlineKeyboardButton(text='🏆Рейтинг по балансу', callback_data='rating'))
-        build.add(InlineKeyboardButton(text='🏆Рейтинг по рефералам', callback_data='top_referrers')) 
-        # build.add(InlineKeyboardButton(text='🏆Рейтинг по рефералам за 24 часа', callback_data='referrers24hour')) 
+        build.add(InlineKeyboardButton(text='🏆Рейтинг по рефералам', callback_data='top_referrers'))
         build.add(InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu'))
         build.adjust(1)
         await callback.message.edit_text(text, reply_markup=build.as_markup())
         await callback.answer()
-
 
 @router.callback_query(F.data == 'support')
 async def refki_handler(callback: types.CallbackQuery, bot: Bot):
@@ -197,7 +180,7 @@ async def refki_handler(callback: types.CallbackQuery, bot: Bot):
     if not await check_subs_op(user_id, bot):
         return
     
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     
@@ -212,7 +195,6 @@ async def refki_handler(callback: types.CallbackQuery, bot: Bot):
         add_button2 = InlineKeyboardButton(text="💱 Токеномика", url=token)
         add_button3 = InlineKeyboardButton(text="🛠️ Служба поддержки", callback_data='support_menu')
         add_button1 = InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')
-        # Создаем клавиатуру и добавляем в нее кнопку
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button01], [add_button], [add_button2], [add_button0], [add_button3], [add_button1]])
         await callback.message.edit_text('''
     Тут вы найдите всю нужную информацию касательно нашего проекта
@@ -223,7 +205,6 @@ async def refki_handler(callback: types.CallbackQuery):
     support_link = "https://t.me/mitcoinmen"
     add_button3 = InlineKeyboardButton(text="🛠️ Служба поддержки", url=support_link)
     add_button1 = InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')
-    # Создаем клавиатуру и добавляем в нее кнопку
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button3], [add_button1]])
     await callback.message.edit_text('''
 🛠️ Если у вас возникли технические трудности или вы нашли баг, пишите /report. Или <a href='https://t.me/mitcoin_chat'>в наш ЧАТ</a>. 
@@ -242,12 +223,11 @@ async def refki_handler(callback: types.CallbackQuery, bot: Bot):
     if not await check_subs_op(user_id, bot):
         return
     
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     
     else:
-
         await callback.answer()
         await callback.message.edit_text("""
     👤 ОП (Обязательная Подписка) - функция для чатов, пользователи не смогут писать в чат, пока не подпишутся на необходимые каналы  
@@ -269,7 +249,7 @@ async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
     if not await check_subs_op(user_id, bot):
         return
 
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     
@@ -277,7 +257,6 @@ async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
         await callback.answer()
         user_id = callback.from_user.id
         ops = await DB.get_bonus_ops()
-
 
         unsubscribed_channels = []
         if ops:
@@ -287,7 +266,6 @@ async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
                 if not await is_user_subscribed(user_id, channel_id, bot):
                     unsubscribed_channels.append(link)
 
-            # Если есть каналы, на которые нужно подписаться
         if unsubscribed_channels:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="Подписаться", url=channel) for channel in unsubscribed_channels],
@@ -295,7 +273,6 @@ async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
                 [InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')]
             ])
 
-            # Формируем список каналов для текстового сообщения
             channels_list = "\n".join(
                 [f"{channel}" for channel in unsubscribed_channels])
 
@@ -314,16 +291,12 @@ async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
         await DB.increment_statistics(2, 'gifts')
         await callback.answer('+5000 $MICO')
         await callback.message.edit_text(f"🎉 <b>Поздравляем!</b> 🎉\n🎁Вы получили свой ежедневный бонус — <b>5000 $MICO!</b> ✨\n💰 Мы ценим ваше участие.\n\n>Не забудьте заглянуть завтра за новым бонусом! ", reply_markup=back_menu_kb(user_id))
-        
-
-
 
 @router.callback_query(F.data == 'bonus_proverka')
 async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     await callback.answer()
     user_id = callback.from_user.id
     ops = await DB.get_bonus_ops()
-
 
     unsubscribed_channels = []
     if ops:
@@ -333,7 +306,6 @@ async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
             if not await is_user_subscribed(user_id, channel_id, bot):
                 unsubscribed_channels.append(link)
 
-        # Если есть каналы, на которые нужно подписаться
     if unsubscribed_channels:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="Подписаться", url=channel) for channel in unsubscribed_channels],
@@ -341,7 +313,6 @@ async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
             [InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')]
         ])
 
-        # Формируем список каналов для текстового сообщения
         channels_list = "\n".join(
             [f"{channel}" for channel in unsubscribed_channels])
 
@@ -358,709 +329,6 @@ async def bonus_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot)
     await DB.add_balance(user_id, 5000)
     await callback.answer('+5000 $MICO')
     await callback.message.edit_text(f"🎁 <b>Вы получили ежедневный бонус в размере 5000 $MICO</b>\n\nВозвращайтесь завтра 😉", reply_markup=back_menu_kb(user_id))
-
-
-
-
-@router.callback_query(F.data == 'output_menu')
-async def outputmenu(callback: types.CallbackQuery, state: FSMContext):
-    """Меню выбора способа вывода"""
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="💰 RUB(ВРЕМЕННО НЕДОСТУПНО)", callback_data="withdraw_rub"),
-        InlineKeyboardButton(text="⭐️ Stars", callback_data="withdraw_stars"),
-    ) 
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="profile"))
-    builder.adjust(1)
-    
-    await callback.message.edit_text(
-        "💸 <b>Вывод средств</b>\n\n"
-        "Выберите способ вывода:",
-        reply_markup=builder.as_markup()
-    )
-
-
-
-@router.callback_query(F.data == 'output_menuF')
-async def outputmenu(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    user_id = callback.from_user.id
-    user = await DB.select_user(user_id)
-    rub_balance = user['rub_balance']
-
-    add_button1 = InlineKeyboardButton(text=f"💲 USDT", callback_data=f'usdt_output_menu')
-    add_button2 = InlineKeyboardButton(text=f"RUB", callback_data=f'rub_output_menu') 
-    add_button3 = InlineKeyboardButton(text="🔙 Назад", callback_data='profile')
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button2], [add_button3]])
-    await callback.message.edit_text(f'''
-⚡ В данном разделе Вы можете произвести вывод ваших средств с баланса в рублях <i>(рубли можно получить при помощи конвертации)</i>
-
-<span class="tg-spoiler"><b>Лимиты:</b>
-Вывод в USDT - от 2.5$ 
-Вывод в рублях - от 250₽</span>
-
-⚠ Вывод производится в течении 3 рабочих дней
-
-<b>Выберите способ вывода:</b>
-    ''', reply_markup=keyboard)
-
-
-@router.callback_query(F.data == 'usdt_output_menuF')
-async def outputusdtmenu(callback: types.CallbackQuery, state: FSMContext):
-    user_id = callback.from_user.id
-    user = await DB.select_user(user_id)
-    rub_balance = user['rub_balance']
-
-    data_cbr = requests.get('https://www.cbr-xml-daily.ru/daily_json.js').json()
-    usd_data = data_cbr['Valute']['USD']
-    usd = usd_data['Value']
-    usd = int(usd)
-    user_usdt = rub_balance/usd
-
-    print(user_usdt)
-    if user_usdt < 2.5:
-        await callback.message.edit_text(f"😢 <b>Недостаточно средств на балансе</b>\n\nНа вашем балансе {round(user_usdt, 3)}$, минимальная сумма <b>должна быть более 2.5$</b>", reply_markup=back_profile_kb())
-        return
-
-
-    add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')
-    # Создаем клавиатуру и добавляем в нее кнопку
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button2]])
-    await callback.message.edit_text(f'💳 Укажите сумму <b>от 2.5 до {round(user_usdt, 3)} USDT</b>, которую вы хотите вывести', reply_markup=keyboard)
-    await state.set_state(output.usdt)
-    await state.update_data(usd=usd, user_usdt=user_usdt)
-
-
-
-@router.message(output.usdt)
-async def outputusdtmenu1(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    try:
-        text = float(message.text)
-    except ValueError:
-        await message.answer("<b>Введите целое число</b>",reply_markup=back_menu_kb(user_id))
-        return
-
-    statedata = await state.get_data()
-    usd = statedata['usd']
-    user_usdt = statedata['user_usdt']
-
-    if text < 2.5 or text > user_usdt:
-        await message.answer(f'❗ Укажите сумму <b>от 2.5 до {user_usdt} USDT</b>', reply_markup=back_menu_kb(user_id))
-        return
-    await state.clear()
-    await state.set_state(output.usdt1)
-    await state.update_data(usd=usd, user_usdt=user_usdt, amount=text)
-
-    await message.answer(f'👛 Теперь укажите Ваш кошелёк <b>USDT (BEP20)</b>, на который будет произведен вывод\n\n‼ <b>Внимание! При некорректном адресе кошелька/неверной сети - сумма вывода возвращена НЕ будет</b>', reply_markup=back_menu_kb(user_id))
-
-
-
-
-
-@router.message(output.usdt1)
-async def outputusdtmenu11(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    statedata = await state.get_data()
-    usd = statedata['usd']
-    amount = statedata['amount']
-
-    try:
-        wallet = str(message.text)
-
-        if len(wallet) < 5 or len(wallet) > 50:
-            await message.answer("‼ <b>Введите корректный адрес кошелька</b>", reply_markup=back_menu_kb(user_id))
-            return
-
-    except:
-        await message.answer("‼ <b>Введите корректный адрес кошелька</b>",reply_markup=back_menu_kb(user_id))
-        return
-
-
-    usd = int(usd)
-    sum = amount * usd
-    sum = int(sum)
-
-    await message.answer(f'🥳 <b>Заявка на вывод на {amount} USDT создана!</b>\nС вашего баланса списано {sum}₽', reply_markup=back_menu_kb(user_id))
-# Пример добавления транзакции
-    await DB.add_transaction(
-        user_id=user_id,
-        amount=amount,
-        description="вывод USDT",
-        additional_info= None
-    )
-    await DB.add_rub_balance(user_id=user_id, amount=-sum)
-    await DB.add_output(user_id=user_id, amount=amount, wallet=wallet, type=1)
-    await state.clear()
-
-
-
-
-
-
-
-
-
-
-@router.callback_query(F.data == 'rub_output_menu')
-async def outputrubmenu(callback: types.CallbackQuery, state: FSMContext):
-    user_id = callback.from_user.id
-    user = await DB.select_user(user_id)
-    rub_balance = user['rub_balance']
-
-
-    if rub_balance < 250:
-        await callback.message.edit_text(f"😢 <b>Недостаточно средств на балансе</b>\n\nНа вашем балансе {rub_balance}₽, минимальная сумма <b>должна быть 250₽ или более</b>", reply_markup=back_profile_kb())
-        return
-
-
-    add_button = InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button]])
-    await callback.message.edit_text(f'💳 Укажите сумму <b>от 250₽ до {rub_balance}₽</b>, которую вы хотите вывести (целое число)', reply_markup=keyboard)
-    await state.set_state(output.rub)
-
-
-@router.message(output.rub)
-async def outputrubmenu1(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    user = await DB.select_user(user_id)
-    rub_balance = user['rub_balance']
-    try:
-        text = int(message.text)
-    except ValueError:
-        await message.answer("<b>Введите число</b>", reply_markup=back_menu_kb(user_id))
-        return
-
-    if text < 250 or text > rub_balance:
-        await message.answer(f'❗ Укажите сумму <b>от 250₽ до {rub_balance}₽</b>', reply_markup=back_menu_kb(user_id))
-        return
-
-    await state.clear()
-    await state.set_state(output.rub1)
-    await state.update_data(amount=text)
-
-    await message.answer(f'👛 Теперь укажите номер <b>банковской карты/телефона</b> (для перевода по СБП), а так же <b>имя и фамилию получателя</b>\n\n‼ <b>Внимание! При некорректном номере карты/телефона - сумма вывода возвращена НЕ будет</b>', reply_markup=back_menu_kb(user_id))
-
-
-@router.message(output.rub1)
-async def outputrubmenu11(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
-    statedata = await state.get_data()
-    amount = statedata['amount']
-    try:
-        wallet = str(message.text)
-        if len(wallet) > 100 or len(wallet) < 5:
-            await message.answer("‼ <b>Введите корректный номер карты/телефона</b>", reply_markup=back_menu_kb(user_id))
-            return
-
-    except:
-        await message.answer("‼ <b>Введите корректный номер карты/телефона</b>", reply_markup=back_menu_kb(user_id))
-        return
-
-    await message.answer(f'🥳 <b>Заявка на вывод на {amount}₽ создана!</b>\nС вашего баланса списано {amount} рублей', reply_markup=back_menu_kb(user_id))
-    await DB.add_transaction(
-        user_id=user_id,
-        amount=amount,
-        description="вывод RUB",
-        additional_info= None
-    )
-    await DB.add_rub_balance(user_id=user_id, amount=-amount)
-    await DB.add_output(user_id=user_id, amount=amount, wallet=wallet, type=2)
-    await state.clear()
-
-
-
-
-
-
-
-
-
-
-@router.callback_query(F.data == 'corvertation')  # <-- исправлено название
-async def convertation_handler(callback: types.CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-
-    if not await check_subs_op(user_id, bot):
-        return
-
-    if not await DB.get_break_status():
-        await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
-        return
-
-    # Проверка конвертации
-    last_conversion_date = await DB.get_last_conversion_date(user_id)
-    print(last_conversion_date)
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-
-    if last_conversion_date == today:
-        await callback.message.edit_text(
-            "❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\n"
-            "Попробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>",
-            reply_markup=back_profile_kb()
-        )
-        return
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Продолжить!", callback_data='mittorub')],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')],
-    ])
-    await callback.message.edit_text(
-        "🌀 <b>Вы можете конвертировать ваши $MICO в рубли!</b>\n\n"
-        "<i>Конвертацию можно проводить не более 1 раза в день и не более чем на 1% от баланса</i>",
-        reply_markup=keyboard
-    )
-
-
-@router.callback_query(F.data == 'mittorub')
-async def corvertation_rubtomit_handler(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    user_id = callback.from_user.id
-    user = await DB.select_user(user_id)
-    mit_balance = user['balance']
-
-    print(mit_balance)
-
-    last_conversion_date = await DB.get_last_conversion_date(user_id) 
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-    if last_conversion_date == today:
-        await callback.message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_profile_kb())
-        return 
-
-    if mit_balance is None or mit_balance == 0:
-        await callback.message.edit_text('😢 <b>У вас недостаточно $MICO для осуществления конвертации</b>', reply_markup=back_profile_kb())
-
-    maxprocent = mit_balance // 100
-
-    if maxprocent < 1000:
-        await callback.message.edit_text('😢 <b>У вас недостаточно $MICO для осуществления конвертации</b>', reply_markup=back_profile_kb())
-
-
-    add_button1 = InlineKeyboardButton(text=f"Максимально ({maxprocent} $MICO)", callback_data=f'convert_{maxprocent}')
-    add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button2]])
-
-    await callback.message.edit_text(f'''
-❓ <b>Сколько $MICO (MitCoin) вы хотите конвертировать в рубли?</b>
-
-<i>Максимальная сумма: 1% от MitCoin баланса</i> - {maxprocent}
-    ''', reply_markup=keyboard)
-
-    await state.set_state(convertation.mittorub)
-    await state.update_data(maxprocent=maxprocent)
-
-
-@router.message(convertation.mittorub)
-async def corvertation_rubtomit_input(message: types.Message, state: FSMContext):
-    maxprocent = await state.get_data()
-    maxprocent = maxprocent['maxprocent']
-    print(f'макс процент {maxprocent}')
-
-    try:
-        convert_amount = int(message.text)
-        await state.clear()
-    except ValueError:
-        await message.reply("❌ Введено некорректное значение, пожалуйста, введите число.", reply_markup=back_menu_kb(user_id))
-        return
-
-    user_id = message.from_user.id
-    user = await DB.select_user(user_id)
-    mit_balance = user['balance']
-    rub_balance = user['rub_balance']
-
-
-    last_conversion_date = await DB.get_last_conversion_date(user_id)
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-
-    if last_conversion_date == today:
-        await message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_menu_kb(user_id))
-        return
-
-    if convert_amount > maxprocent:
-        await message.answer('❌ Вы не можете конвертировать больше 1% от своего $MICO баланса', reply_markup=back_menu_kb(user_id))
-        return
-
-    if convert_amount < 1000:
-        await message.answer('❌ Невозможно конвертировать сумму меньше 1000 $MICO', reply_markup=back_menu_kb(user_id))
-        return
-
-
-    add_rub_balance = convert_amount//1000  # 1000 $MICO = 1 рубль
-    await DB.add_rub_balance(user_id, add_rub_balance)
-    await DB.add_balance(user_id, -convert_amount)
-    await DB.update_last_conversion_date(user_id)
-
-    user = await DB.select_user(user_id)
-    mit_balance = user['balance']
-    rub_balance = user['rub_balance']
-    await DB.add_transaction(
-        user_id=user_id,
-        amount=convert_amount,
-        description="конвертация",
-        additional_info= None
-    )
-    await message.answer(f"✅ <b>Вы успешно конвертировали {convert_amount} $MICO в {add_rub_balance}₽</b>\n\n"
-                                     f"💰 <b>Текущий баланс:</b>\nMitCoin - {mit_balance} $MICO;\nРубли - {rub_balance}₽", reply_markup=back_menu_kb(user_id))
-
-
-
-
-@router.callback_query(lambda c: c.data.startswith("convert_"))
-async def corvertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-    convert_amount = int(callback.data.split('_')[1])  # Начальная страница
-    user = await DB.select_user(user_id)
-    mit_balance = user['balance']
-    rub_balance = user['rub_balance']
-    maxprocent = mit_balance // 100
-
-    last_conversion_date = await DB.get_last_conversion_date(user_id)
-    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
-
-    if last_conversion_date == today:
-        await callback.message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_menu_kb(user_id))
-        return
-
-    if convert_amount > maxprocent:
-        await callback.message.edit_text('❌ Вы не можете конвертировать больше 1% от своего $MICO баланса', reply_markup=back_menu_kb(user_id))
-        return
-
-    if convert_amount < 1000:
-        await callback.message.edit_text('❌ Невозможно конвертировать сумму меньше 1000 $MICO', reply_markup=back_menu_kb(user_id))
-        return
-
-
-    add_rub_balance = convert_amount//1000  # 1000 $MICO = 1 рубль
-    await DB.add_rub_balance(user_id, add_rub_balance)
-    await DB.add_balance(user_id, -convert_amount)
-    await DB.update_last_conversion_date(user_id)
-
-    user = await DB.select_user(user_id)
-    mit_balance = user['balance']
-    rub_balance = user['rub_balance']
-
-    await callback.message.edit_text(f"✅ <b>Вы успешно конвертировали {convert_amount} $MICO в {add_rub_balance}₽</b>\n\n"
-                                     f"💰 <b>Текущий баланс:</b>\nMitCoin - {mit_balance} $MICO;\nРубли - {rub_balance}₽", reply_markup=back_menu_kb(user_id))
-
-
-    await DB.add_transaction(
-        user_id=user_id,
-        amount=convert_amount,
-        description="конвертация",
-        additional_info= None
-    )
-
-
-
-
-
-
-
-CRYPTOBOT_TESTNET = False  # Указываем, что это тестовая среда
-
-# Глобальная переменная для cryptopay
-cryptopay = None
-
-async def init_cryptopay():
-    """Инициализация AioCryptoPay"""
-    global cryptopay
-    if cryptopay is None:
-        cryptopay = AioCryptoPay(token=CRYPTOBOT_TOKEN, network=Networks.MAIN_NET)
-    return cryptopay
-
-
-@router.callback_query(F.data == 'select_deposit_menu')
-async def select_deposit_handler(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    await callback.answer()
-    await callback.message.edit_text("<b>Выберите удобный Вам способ депозита:</b>\n\n🔥 Акция, при депозите за рубли +25% к пополнению!", reply_markup=select_deposit_menu_kb(user_id))
-
-@router.callback_query(F.data == 'deposit_menu')
-async def deposit_handler(callback: types.CallbackQuery):
-    # Создание кнопок для депозитов
-    buttons = [
-        ("100к MITcoin | 1💲", 100000, 1),
-        ("250к MITcoin | 2.5💲", 250000, 2.5),
-        ("500к MITcoin | 5💲", 500000, 5),
-        ("1кк MITcoin | 10💲", 1000000, 10),
-        ("2.5кк MITcoin | 25💲", 2500000, 25),
-        ("5кк MITcoin | 50💲", 5000000, 50),
-        ("🔙 Назад", None, None)  # Кнопка "Назад"
-    ]
-
-    # Создание списка кнопок для InlineKeyboardMarkup
-    inline_buttons = []
-    for text, amount, price in buttons:
-        if amount is not None and price is not None and isinstance(amount, int):
-            inline_buttons.append([InlineKeyboardButton(text=text, callback_data=f'deposit_{amount}_{price}')])
-        else:
-            inline_buttons.append([InlineKeyboardButton(text=text, callback_data='select_deposit_menu')])  # Кнопка "Назад"
-
-    builder = InlineKeyboardMarkup(inline_keyboard=inline_buttons)  # Передача inline_keyboard
-
-    await callback.message.edit_text(
-        "💵 <b>Пополните баланс с помощью CryptoBot</b>\n\nВыберите сумму для пополнения:",
-        reply_markup=builder)
-
-
-@router.callback_query(F.data.startswith('deposit_'))
-async def handle_deposit(callback: types.CallbackQuery, bot: Bot):
-    data = callback.data.split('_')
-    amount = int(data[1])  # Сумма MITcoin
-    price = float(data[2])  # Цена в USDT
-
-    try:
-        invoice = await cryptopay.create_invoice(
-            amount=price,
-            asset='USDT',  # Указываем, что это счет для USDT
-            description=f'Пополнение на {amount} MITcoin'
-        )
-
-        # Выводим все доступные атрибуты объекта invoice для отладки
-        logger.error(f"Объект инвойса: {invoice}")
-
-        # Получаем URL для оплаты
-        payment_url = invoice.bot_invoice_url
-
-        if not payment_url:
-            logger.error("URL для оплаты не найден.")
-            await callback.message.edit_text("🤔 Ошибка при создании счета. Попробуйте еще раз...",
-                                             reply_markup=back_profile_kb())
-            return
-
-        # Создаем разметку для клавиатуры
-        builder = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🔗 Оплатить", url=payment_url)
-            ],
-            [
-                InlineKeyboardButton(text="🔙 Назад", callback_data="deposit_menu")
-            ]
-        ])
-
-        await callback.message.edit_text(
-            f"🧾 <b>Ваш счет на {amount} MITcoin:</b> \n\nСумма к оплате: {price} USDT. \n\n‼️ <b>После оплаты счета НЕ ВЫХОДИТЕ из данного меню до получения уведомления, иначе Ваш баланс пополнен НЕ БУДЕТ</b>\n\n⏳ <em>Счет действителен 5 минут</em>",
-            reply_markup=builder
-        )
-
-        user_id = callback.from_user.id
-        invoice_id = invoice.invoice_id
-        for _ in range(30):  # 30 * 10 секунд = 300 секунд (5 минут)
-            invoice = await cryptopay.get_invoices(invoice_ids=invoice_id)  # Получаем текущий статус инвойса
-            logger.info(f"Статус инвойса {invoice_id}: {invoice.status}")
-
-            if invoice.status == 'paid':
-                # Если счет оплачен, начисляем MITCoin пользователю
-                await DB.add_balance_dep(user_id, amount)
-                await DB.add_deposit(user_id, amount=price)
-                await callback.message.edit_text(f"🥳 Поздравляем! Вам начислено {amount} MITcoin",
-                                                 reply_markup=back_menu_kb(user_id))
-                await DB.add_transaction(
-                    user_id=user_id,
-                    amount=amount,
-                    description="пополнение кб",
-                    additional_info= None 
-                )
-                return
-
-            await asyncio.sleep(10)  # Ждем 10 секунд перед следующей проверкой
-
-    except Exception as e:
-        logger.error(f"Ошибка при создании счета: {e}")
-        await callback.message.edit_text("Ошибка при создании счета. Попробуйте еще раз.")
-
-
-
-
-@router.callback_query(F.data == 'dep_stars_menu')
-async def dep_stars_handler(callback: types.CallbackQuery):
-    # Создание кнопок для пополнений через Telegram Stars
-    buttons = [
-        ("100к MITcoin | 49 ⭐", 100000, 49),
-        ("250к MITcoin | 124 ⭐", 250000, 124),
-        ("500к MITcoin | 249 ⭐", 500000, 249),
-        ("1кк MITcoin | 499 ⭐", 1000000, 499),
-        ("2.5кк MITcoin | 1249 ⭐", 2500000, 1249),
-        ("5кк MITcoin | 2499 ⭐", 5000000, 2499),
-        ("🔙 Назад", None, None)  # Кнопка "Назад"
-    ]
-
-    # Создание списка кнопок для InlineKeyboardMarkup
-    inline_buttons = []
-    for text, amount, price in buttons:
-        if amount is not None and price is not None and isinstance(amount, int):
-            inline_buttons.append([InlineKeyboardButton(text=text, callback_data=f'stars_{amount}_{price}')])
-        else:
-            inline_buttons.append([InlineKeyboardButton(text=text, callback_data='select_deposit_menu')])  # Кнопка "Назад"
-
-    builder = InlineKeyboardMarkup(inline_keyboard=inline_buttons)
-
-    await callback.message.edit_text(
-        "⭐ <b>Пополните баланс через Telegram Stars:</b>\n\nВыберите сумму:",
-        reply_markup=builder
-    )
-
-
-# Обработка кнопок пополнения через Telegram Stars
-# Функция обработки кнопок для оплаты Stars
-@router.callback_query(F.data.startswith('stars_'))
-async def process_stars_payment(callback: types.CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-    data = callback.data.split('_')  # Разделяем данные
-
-    try:
-        amount = int(data[1])  # Сумма MITcoin
-        stars = int(data[2])   # Стоимость в Stars
-    except (IndexError, ValueError):
-        await callback.message.edit_text("❌ Ошибка обработки данных для платежа. Попробуйте снова.")
-        await callback.answer()
-        return
-
-    # Создаем цены для оплаты
-    prices = [LabeledPrice(label=f"{stars} Stars", amount=stars)]  # Цена в копейках
-
-    try:
-        # Отправляем счет
-        await bot.send_invoice(
-            chat_id=user_id,
-            title=f"⭐ {amount} $MICO",
-            description=f"Купить {amount} $MICO ($MICO) за {stars} Stars",
-            payload=f"user_{user_id}_stars_{amount}",
-            provider_token="",
-            currency="XTR",
-            prices=prices,
-            start_parameter="stars_payment"
-        )
-    except Exception as e:
-        await callback.message.edit_text(f"❌ Ошибка при создании счета: {e}")
-        print(e)
-        await callback.answer()
-
-# Функция для обработки платежей
-@router.pre_checkout_query()
-async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery, bot: Bot):
-    # Подтверждаем платеж
-    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
-
-# Функция завершения оплаты
-
-@router.message(F.successful_payment)
-async def successful_payment_handler(message: types.Message, bot: Bot):
-    user_id = message.from_user.id 
-    payload = message.successful_payment.invoice_payload  # Определяем payload до использования
-
-
-    # Проверяем, является ли оплата за майнинг
-    if payload.startswith(f"user_{user_id}_stars_199"):
-        # Обработка оплаты за майнинг
-        # await DB.activate_mining(user_id)  # Активируем майнинг в базе данных
-        await DB.add_mining(user_id, 1)
-        kb = InlineKeyboardBuilder()
-        kb.button(text='🚀 Майнинг', callback_data='mining')
-        await message.answer("🚀 Майнинг активирован! Теперь вы можете зарабатывать $MICO автоматически. Заходите в меню майнинга, чтобы следить за доходом!", reply_markup=kb.as_markup())
-        return 
-    
-    try:
-        # Разделяем payload
-        parts = payload.split('_')  # ['user', '<user_id>', 'stars', '<amount>']
-        user_id = int(parts[1])  # Преобразуем user_id
-        amount = int(parts[3])  # Преобразуем amount
-    except (ValueError, IndexError) as e:
-        await message.answer("☹  Произошла ошибка при обработке оплаты, обратитесь в тех. поддержку с чеком, который доступен выше")
-        print(f"Error parsing payload: {payload} - {e}") 
-        return
-
-    # Определяем количество звезд в зависимости от суммы
-    if amount == 100000:
-        stars = 49
-    elif amount == 250000:
-        stars = 124 
-    elif amount == 500000:
-        stars = 249
-    elif amount == 1000000:
-        stars = 499
-    elif amount == 2500000:
-        stars = 1249
-    elif amount == 5000000:
-        stars = 2499
-    else:
-        stars = amount / 3000
-
-    dep_stats = stars * 0.013
-    # Зачисляем MITcoin на баланс пользователя
-    await DB.add_balance_dep(user_id, amount)
-    await DB.add_deposit(user_id, amount=dep_stats)
-
-    # Отправляем сообщение об успешном пополнении
-    await message.answer(
-        f"✅ Пополнение успешно завершено!\n\n💳 Сумма: <b>{amount} MITcoin</b>\n"
-        f"💸 Стоимость: <b>{stars} Stars</b>\n\nСпасибо за то, что Вы с нами! 😊",
-        reply_markup=back_profile_kb()
-    )
-
-    # Записываем транзакцию в базу данных
-    await DB.add_transaction(
-        user_id=user_id,
-        amount=amount,
-        description="пополнение звёзды",
-        additional_info=None
-    )
-
-
-
-
-
-
-@router.callback_query(F.data == 'buy_stars')
-async def buystars_handler(callback: types.CallbackQuery, state: FSMContext):
-    user_id = callback.from_user.id
-    await callback.answer()
-    await callback.message.edit_text("<b>Вы можете обменять свои Telegram Stars на $MICO по курсу:</b>\n\n1⭐ = 3000 $MICO\n\n<b>Введите количество звезд, которое вы хотите продать</b>", reply_markup=back_menu_kb(user_id))
-    await state.set_state(buystars.buystars)
-
-
-@router.message(buystars.buystars)
-async def buystars_hand(message: types.Message, state: FSMContext, bot: Bot):
-    stars_amount = message.text
-    try:
-        stars_amount = int(stars_amount)
-    except ValueError:
-        await message.answer("Ошибка, повторите попытку", reply_markup=back_menu_kb(user_id))
-        return
-
-    user_id = message.from_user.id
-    stars = stars_amount
-    amount = stars * 3000
-
-    await state.clear()
-    # Создаем цены для оплаты
-
-    prices = [LabeledPrice(label=f"{stars} Stars", amount=stars)]  # Цена в копейках
-    try:
-        # Отправляем счет
-        await bot.send_invoice(
-            chat_id=user_id,
-            title=f"Продажа ⭐",
-            description=f"Продать {stars} ⭐ за {amount} MitCoin",
-            payload=f"user_{user_id}_stars_{amount}",
-            provider_token="",
-            currency="XTR",
-            prices=prices,
-            start_parameter="stars_payment"
-        )
-    except Exception as e:
-        await message.answer(f"❌ Ошибка при создании счета: {e}", reply_markup=back_menu_kb(user_id))
-        print(e)
-
-
-
-
-
-@router.callback_query(F.data == 'rub_donate')
-async def rub_donate_h(callback: types.CallbackQuery):
-    await callback.answer()
-    await callback.message.edit_text("🔥 Акция, при депозите за рубли +25% к пополнению!\n\n💰 Для депозита в рублях обращаться - @Coin_var", reply_markup=back_dep_kb())
-
 
 @router.callback_query(F.data == 'refka_menu')
 async def refki_handler(callback: types.CallbackQuery, bot: Bot):
@@ -1099,7 +367,6 @@ ID того, кто пригласил: <code>{referrer_id}</code>\n
     await callback.message.edit_text(text, reply_markup=back_profile_kb())
     await callback.answer()
 
-
 async def get_cached_data(key):
     """Получить данные из кэша"""
     data = redis_client.get(key)
@@ -1112,14 +379,11 @@ async def set_cached_data(key, data, ttl=None):
     else:
         redis_client.set(key, json.dumps(data))
 
-
-from utils.redis_utils import *
-
 async def update_message_with_data(message, data, user_id):
     """Обновить сообщение с данными о заданиях"""
     await message.edit_text(
         f'''
-💰 Вы можете заработать - <b>{data['total']} $MICO</b>
+💰 Вы можете заработать - <b>{round(data['total'], 2)} $MICO</b>
 
 <b>Заданий на:</b>
 📣 Каналы - {data['channel']} 
@@ -1144,7 +408,7 @@ async def works_handler(callback: types.CallbackQuery, bot: Bot):
     if not await check_subs_op(user_id, bot):
         return
 
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     
@@ -1163,6 +427,8 @@ async def works_handler(callback: types.CallbackQuery, bot: Bot):
 🔗 Переходы в бота - загрузка...
 🚀 Бусты - загрузка...
 
+Эти данные не учитывают Ваши выполненные и пропущенные задания. У вас может быть доступно меньшее количество заданий
+
 🚨 <em>Запрещено покидать канал/чат ранее чем через 7 дней. За нарушение вы можете получить блокировку заработка или штраф!</em>
 
 <b>Выберите способ заработка</b> 👇    
@@ -1172,50 +438,42 @@ async def works_handler(callback: types.CallbackQuery, bot: Bot):
 
     task_types = ['channel', 'chat', 'post', 'comment', 'reaction', 'link', 'boost']
     counts = {key: 0 for key in task_types}
+    total_earn = 0  # Общая сумма заработка
 
     for task_type in task_types:
-        # Обновляем кэш перед подсчётом
-        await RedisTasksManager.refresh_task_cache(bot, task_type)
         cached = await RedisTasksManager.get_cached_tasks(task_type)
-
-        valid_count = 0
-        for task in cached or []:
-            task_id = task['id'] if isinstance(task, dict) else task[0]
-            if not (await DB.is_task_completed(user_id, task_id) or
-                    await DB.is_task_failed(user_id, task_id) or
-                    await DB.is_task_pending(user_id, task_id)):
-                valid_count += 1
-
+        valid_count = len(cached or [])
         counts[task_type] = valid_count
+        total_earn += valid_count * all_price.get(task_type, 0)
 
-    counts['total'] = sum(counts.values())
+    counts['total'] = total_earn  # Теперь это корректная сумма $MICO
 
     await update_message_with_data(temp_message, counts, user_id)
-
-
 
 async def get_filtered_tasks_with_info(task_type, bot, user_id):
     tasks = await DB.select_tasks_by_type(task_type)
     filtered_tasks = []
-    
+
+    # Получаем все завершённые/проваленные/ожидающие задания пользователя
+    excluded_ids = await DB.get_user_task_statuses(user_id)
+
     for task in tasks:
-        if (await DB.is_task_completed(user_id, task[0]) or
-            await DB.is_task_failed(user_id, task[0]) or
-            await DB.is_task_pending(user_id, task[0])):
+        task_id = task[0]
+        if task_id in excluded_ids:
             continue
-            
+
         task_info = {
-            'id': task[0],
+            'id': task_id,
             'user_id': task[1],
             'target_id': task[2],
             'amount': task[3],
             'type': task[4],
-            'other': task[6],
+            'other': task[6] if len(task) > 6 else None,
             'valid': True
         }
-        
+
         try:
-            if task_type in [1, 2]:
+            if task_type in [1, 2]:  # Чат или канал
                 try:
                     chat = await bot.get_chat(task[2])
                     task_info['title'] = chat.title
@@ -1225,43 +483,16 @@ async def get_filtered_tasks_with_info(task_type, bot, user_id):
                     task_info['valid'] = False
         except Exception as e:
             task_info['valid'] = False
-        
+
         if task_info['valid']:
             filtered_tasks.append(task_info)
-    
+
     return filtered_tasks
-
-
-
-
-
-
-
-
-# Запуск фоновой задачи в основном цикле
-# async def start_background_tasks(bot, DB):
-    # Запускаем задачу обновления кэша раз в 5 минут
-    # asyncio.create_task(remind_mining_collection(bot))
-    # asyncio.create_task(scheduled_cache_update(bot, DB)) #channel
-    # asyncio.create_task(scheduled_cache_update_chat(bot, DB)) #chat
-    # asyncio.create_task(check_subscriptions_periodically(bot))
-    # asyncio.create_task(check_subscriptions_periodically_boost(bot))
-    # asyncio.create_task(process_tasks_periodically(bot)) #post
-    # asyncio.create_task(update_reaction_tasks_periodically()) #reactions
-    # asyncio.create_task(scheduled_db_backup(bot)) #отправка бд в чат
-
-
-
-
-
-#ЗАДАНИЯ НА ПРОСМОТОР. ОТБОР
 
 # Глобальная переменная для хранения обработанных заданий
 processed_tasks = [] # POST
 available_tasks = [] # LINKS
 available_boost_tasks = [] # BOOSTS 
-
-
 
 async def get_available_tasks(user_id, all_tasks):
     tasks = []
@@ -1273,9 +504,6 @@ async def get_available_tasks(user_id, all_tasks):
             not await DB.is_task_skipped(user_id, task_id)):
             tasks.append(task)
     return tasks
-
-
-
 
 # Метод для получения страницы с заданиями (пагинация)
 def paginate_tasks(tasks, page=1, per_page=5):
@@ -1306,7 +534,6 @@ async def on_bot_added(event: ChatMemberUpdated, bot: Bot):
         elif event.chat.type == 'channel':
             return
 
-
 # Метод для получения страницы с заданиями (пагинация)
 async def paginate_tasks_chating(tasks, vchatingpage=1, per_page=5):
     total_pages = (len(tasks) + per_page - 1) // per_page  # Вычисление общего количества страниц
@@ -1314,13 +541,6 @@ async def paginate_tasks_chating(tasks, vchatingpage=1, per_page=5):
     end_idx = start_idx + per_page
     tasks_on_page = tasks[start_idx:end_idx]
     return tasks_on_page, total_pages
-
-
-
-
-
-
-
 
 @router.message(Command('help'))
 async def help_handler(message: types.Message, state: FSMContext):
@@ -1338,7 +558,6 @@ async def help_handler(message: types.Message, state: FSMContext):
 
 При включенной обязательной подписке пользователи не смогут писать в чат, пока не подпишутся на необходимые каналы 
         ''')
-
 
 # Команда /setup для настройки ОП
 @router.message(Command('setup'))
@@ -1391,8 +610,6 @@ async def setup_op(message: types.Message, bot: Bot):
     if expiration_time:
         asyncio.create_task(remove_op_after_delay(chat_id, channel_id, expiration_time, bot))
 
-
-
 # Команда /unsetup для удаления ОП
 @router.message(Command('unsetup'))
 async def unsetup_op(message: types.Message, bot: Bot):
@@ -1410,7 +627,6 @@ async def unsetup_op(message: types.Message, bot: Bot):
         channel_id = command_parts[1]
         await DB.remove_op(chat_id, channel_id)
         await message.reply(f"ОП на {channel_id} удалена 🗑️")
-
 
 # Команда /status для отображения всех ОП
 @router.message(Command('status'))
@@ -1443,12 +659,10 @@ async def status_op(message: types.Message):
 
     await message.reply(status_message)
 
-
 async def is_user_admin(user_id, chat_id, bot):
     member = await bot.get_chat_member(chat_id, user_id)
     # Проверка статуса на наличие прав администратора или владельца
     return member.status in ["administrator", "creator"]
-
 
 async def is_user_subscribed(user_id: int, channel_id: int, bot: Bot) -> bool:
     # Проверка, подписан ли пользователь на канал.
@@ -1458,14 +672,12 @@ async def is_user_subscribed(user_id: int, channel_id: int, bot: Bot) -> bool:
     except TelegramBadRequest:
         return False
 
-
 async def remove_op_after_delay(chat_id: int, channel_id: str, expiration_time: datetime, bot: Bot):
     # Функция для автоматического удаления ОП по истечении времени.
     delay = (expiration_time - datetime.now()).total_seconds()
     await asyncio.sleep(delay)
     await DB.remove_op(chat_id, channel_id)
     await bot.send_message(chat_id, f"ОП на {channel_id} была удалена в связи с окончанием таймера 🗑️")
-
 
 @router.message(lambda message: message.chat.type in ['group', 'supergroup'])
 async def handler_chat_message(message: types.Message, bot: Bot):
@@ -1544,14 +756,6 @@ async def handler_chat_message(message: types.Message, bot: Bot):
                 await asyncio.sleep(30)
                 await msg.delete()
 
-
-
-
-
-
-
-
-
 # Команда /top
 @router.callback_query(F.data.startswith('rating'))
 async def show_top(callback: types.CallbackQuery):
@@ -1578,7 +782,6 @@ async def show_top(callback: types.CallbackQuery):
     
     # Отправляем сообщение с рейтингом
     await callback.message.edit_text("🏆 Топ-10 пользователей по балансу 🏆", reply_markup=keyboard.as_markup())
-
 
 @router.callback_query(F.data.startswith('top_referrers'))
 async def show_top_referrers(callback: types.CallbackQuery):
@@ -1612,7 +815,6 @@ async def show_top_referrers(callback: types.CallbackQuery):
         "🏆 Топ-10 пользователей по количеству приглашённых рефералов 🏆", 
         reply_markup=keyboard.as_markup()
     )
-
 
 @router.callback_query(F.data.startswith('referrers24hour'))
 async def show_top_referrers(callback: types.CallbackQuery):
@@ -1656,49 +858,10 @@ async def show_top_referrers(callback: types.CallbackQuery):
         "🏆 Топ-10 пользователей по количеству приглашённых рефералов за последние 24 часа 🏆", 
         reply_markup=keyboard.as_markup()
     )
-# Пример использования
-
-
 
 async def increment_daily_statistics(column):
     """Увеличивает значение в колонке ежедневной статистики."""
     await DB.increment_statistics(user_id=2, column=column)
-
-
-
-
-# @router.callback_query(F.data.startswith('info_'))
-# async def info_handler(callback: types.CallbackQuery, bot: Bot):
-#     user_id = callback.from_user.id
-#     task_id = int(callback.data.split('_')[-1])  # Извлекаем ID задания из callback_data
-
-#     # Получаем данные задания
-#     task = await DB.get_task_by_id(task_id)
-#     if not task:
-#         await callback.answer(" не найдено.")
-#         return
-
-#     target_id = task[2]
-#     chat_id, message_id = map(int, target_id.split(":"))
-
-#     # Получаем информацию о посте
-#     success = await info(user_id, chat_id, message_id, bot)
-
-#     if success:
-#         await callback.answer("✅ Информация о посте отправлена.")
-#     else:
-#         await callback.answer("❌ Не удалось получить информацию о посте.")
-
-
-
-
-# # Обработчик команды /info
-# @router.message(Command('info'))
-# async def handle_info_command(message: types.Message, state: FSMContext):
-#     # Запрашиваем у пользователя переслать пост
-#     await state.set_state(Info.forward)
-#     await message.answer("📨 Пожалуйста, перешлите пост из канала, о котором хотите получить информацию.")
-
 
 @router.message(Command('opp'))
 async def start(message: types.Message, bot: Bot):
@@ -1706,7 +869,7 @@ async def start(message: types.Message, bot: Bot):
     if not await check_subs_op(user_id, bot):
         return
     
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     
@@ -1740,12 +903,7 @@ async def check_subscription(callback_query: types.CallbackQuery, bot: Bot):
         await callback_query.answer("Спасибо за подписку!", show_alert=True)
         await bot.send_message(user_id, "Теперь вы можете пользоваться ботом.")
 
-
-
-
-
 async def check_subs_op(user_id, bot: Bot):
-
     # Проверяем, подписан ли пользователь на все каналы
     channels = await DB.all_channels_op()
     not_subscribed = []
@@ -1780,6 +938,180 @@ async def check_subs_op(user_id, bot: Bot):
         )
         return False
     return True
+
+
+
+
+@router.callback_query(F.data == 'convertation')  # <-- исправлено название
+async def convertation_handler(callback: types.CallbackQuery, bot: Bot):
+    user_id = callback.from_user.id
+
+    if not await check_subs_op(user_id, bot):
+        return
+
+    # Проверка конвертации
+    last_conversion_date = await DB.get_last_conversion_date(user_id)
+    print(last_conversion_date)
+    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+
+    if last_conversion_date == today:
+        await callback.message.edit_text(
+            "❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\n"
+            "Попробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>",
+            reply_markup=back_profile_kb()
+        )
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Продолжить!", callback_data='mittorub')],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')],
+    ])
+    await callback.message.edit_text(
+        "🌀 <b>Вы можете конвертировать ваши $MICO в рубли!</b>\n\n"
+        "<i>Конвертацию можно проводить не более 1 раза в день и не более чем на 1% от баланса</i>",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == 'mittorub')
+async def convertation_rubtomit_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    user_id = callback.from_user.id
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+
+    print(mit_balance)
+
+    last_conversion_date = await DB.get_last_conversion_date(user_id) 
+    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+    if last_conversion_date == today:
+        await callback.message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_profile_kb())
+        return 
+
+    if mit_balance is None or mit_balance == 0:
+        await callback.message.edit_text('😢 <b>У вас недостаточно $MICO для осуществления конвертации</b>', reply_markup=back_profile_kb())
+
+    maxprocent = mit_balance // 100
+
+    if maxprocent < 1000:
+        await callback.message.edit_text('😢 <b>У вас недостаточно $MICO для осуществления конвертации</b>', reply_markup=back_profile_kb())
+
+
+    add_button1 = InlineKeyboardButton(text=f"Максимально ({maxprocent} $MICO)", callback_data=f'convert_{maxprocent}')
+    add_button2 = InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu')
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_button1], [add_button2]])
+
+    await callback.message.edit_text(f'''
+❓ <b>Сколько $MICO (MitCoin) вы хотите конвертировать в рубли?</b>
+
+<i>Максимальная сумма: 1% от MitCoin баланса</i> - {maxprocent}
+    ''', reply_markup=keyboard)
+
+    await state.set_state(convertation.mittorub)
+    await state.update_data(maxprocent=maxprocent)
+
+
+@router.message(convertation.mittorub)
+async def convertation_rubtomit_input(message: types.Message, state: FSMContext):
+    maxprocent = await state.get_data()
+    maxprocent = maxprocent['maxprocent']
+    print(f'макс процент {maxprocent}')
+
+    try:
+        convert_amount = int(float(message.text))
+        await state.clear()
+    except ValueError:
+        await message.answer("❌ Введено некорректное значение, пожалуйста, введите число.", reply_markup=back_menu_kb(user_id))
+        return
+
+    user_id = message.from_user.id
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+    rub_balance = user['rub_balance']
+
+
+    last_conversion_date = await DB.get_last_conversion_date(user_id)
+    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+
+    if last_conversion_date == today:
+        await message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_menu_kb(user_id))
+        return
+
+    if convert_amount > maxprocent:
+        await message.answer('❌ Вы не можете конвертировать больше 1% от своего $MICO баланса', reply_markup=back_menu_kb(user_id))
+        return
+
+    if convert_amount < 1000:
+        await message.answer('❌ Невозможно конвертировать сумму меньше 1000 $MICO', reply_markup=back_menu_kb(user_id))
+        return
+
+
+    add_rub_balance = convert_amount//1000  # 1000 $MICO = 1 рубль
+    await DB.add_rub_balance(user_id, add_rub_balance)
+    await DB.add_balance(user_id, -convert_amount)
+    await DB.update_last_conversion_date(user_id)
+
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+    rub_balance = user['rub_balance']
+    await DB.add_transaction(
+        user_id=user_id,
+        amount=convert_amount,
+        description="конвертация",
+        additional_info= None
+    )
+    await message.answer(f"✅ <b>Вы успешно конвертировали {convert_amount} $MICO в {add_rub_balance}₽</b>\n\n"
+                                     f"💰 <b>Текущий баланс:</b>\nMitCoin - {mit_balance} $MICO;\nРубли - {rub_balance}₽", reply_markup=back_menu_kb(user_id))
+
+
+
+
+@router.callback_query(lambda c: c.data.startswith("convert_"))
+async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
+    user_id = callback.from_user.id
+    convert_amount = int(float(callback.data.split('_')[1]))  # Начальная страница
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+    rub_balance = user['rub_balance']
+    maxprocent = mit_balance // 100
+
+    last_conversion_date = await DB.get_last_conversion_date(user_id)
+    today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
+
+    if last_conversion_date == today:
+        await callback.message.answer("❌ <b>Конвертацию можно проводить только один раз в день.</b>\n\nПопробуйте завтра <i>(возможность конвертации обновляется в 00:00 по МСК)</i>", reply_markup=back_menu_kb(user_id))
+        return
+
+    if convert_amount > maxprocent:
+        await callback.message.edit_text('❌ Вы не можете конвертировать больше 1% от своего $MICO баланса', reply_markup=back_menu_kb(user_id))
+        return
+
+    if convert_amount < 1000:
+        await callback.message.edit_text('❌ Невозможно конвертировать сумму меньше 1000 $MICO', reply_markup=back_menu_kb(user_id))
+        return
+
+
+    add_rub_balance = convert_amount//1000  # 1000 $MICO = 1 рубль
+    await DB.add_rub_balance(user_id, add_rub_balance)
+    await DB.add_balance(user_id, -convert_amount)
+    await DB.update_last_conversion_date(user_id)
+
+    user = await DB.select_user(user_id)
+    mit_balance = user['balance']
+    rub_balance = user['rub_balance']
+
+    await callback.message.edit_text(f"✅ <b>Вы успешно конвертировали {convert_amount} $MICO в {add_rub_balance}₽</b>\n\n"
+                                     f"💰 <b>Текущий баланс:</b>\nMitCoin - {mit_balance} $MICO;\nРубли - {rub_balance}₽", reply_markup=back_menu_kb(user_id))
+
+
+    await DB.add_transaction(
+        user_id=user_id,
+        amount=convert_amount,
+        description="конвертация",
+        additional_info= None
+    )
+
+
 
 
 

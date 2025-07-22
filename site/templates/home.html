@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+{% endblock %}
+
+{% block content %}
+  <div class="home-container">
+    <h1 class="home-title">Главное меню</h1>
+    <div class="home-content">
+      <p>Здесь будет основное содержимое вашего приложения</p>
+    </div>
+  </div>
+{% endblock %}

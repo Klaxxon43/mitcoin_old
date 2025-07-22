@@ -18,6 +18,16 @@ class BuyStarsStates(StatesGroup):
 @BuyStars.callback_query(F.data == 'BuyStars')
 async def show_buy_stars_menu(callback: types.CallbackQuery, bot: Bot):
     try:
+        user_id = callback.from_user.id
+
+        from handlers.client.client import check_subs_op
+        if not await check_subs_op(user_id, bot):
+            return
+        
+        if await DB.get_break_status() and user_id not in ADMINS_ID:
+            await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
+            return
+        
         current_currency = (await DB.get_stars_sell_currency())[0] 
         
         btn = InlineKeyboardBuilder()

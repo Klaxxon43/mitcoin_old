@@ -37,3 +37,12 @@ class EditTaskState(StatesGroup):
 
 class Info(StatesGroup):
     forward = State()
+
+class DepositStates(StatesGroup):
+    waiting_stars_amount = State()
+    waiting_crypto_amount = State()
+    waiting_rub_amount = State()
+
+    waiting_apays_amount = State()
+
+    waiting_xpay_amount = State()

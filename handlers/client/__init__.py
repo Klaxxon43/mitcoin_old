@@ -5,3 +5,11 @@ from .states import *
 from .my_works import *
 from .commands import *
 from .ton_deposit import *
+from .output import *
+from .deposit import *
+from .apaysDeposit import *
+from .XPayDeposit import *
+from handlers.Checks.menu import *
+from handlers.Checks.single import *
+from handlers.Checks.multi import *
+from .app import *

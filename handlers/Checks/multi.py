@@ -1,8 +1,7 @@
 from utils.Imports import *
 from handlers.client.client import *
-from .menu import check_router
 
-@check_router.callback_query(F.data == 'multi_check')
+@router.callback_query(F.data == 'multi_check')
 async def create_multi_check(callback: types.CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     user_balance = await DB.get_user_balance(user_id)
@@ -23,7 +22,7 @@ async def create_multi_check(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(checks.multi_check_quantity)
     await state.update_data(balance=user_balance)
 
-@check_router.message(checks.multi_check_quantity)
+@router.message(checks.multi_check_quantity)
 async def handle_multi_check_quantity(message: types.Message, state: FSMContext):
     data = await state.get_data()
     balance = data.get('balance')
@@ -42,7 +41,7 @@ async def handle_multi_check_quantity(message: types.Message, state: FSMContext)
     except ValueError:
         await message.answer("❌ Пожалуйста, введите корректное количество активаций", reply_markup=cancel_all_kb())
 
-@check_router.message(checks.multi_check_amount)
+@router.message(checks.multi_check_amount)
 async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     user_balance = await DB.get_user_balance(user_id)
@@ -80,7 +79,7 @@ async def handle_multi_check_amount(message: types.Message, bot: Bot, state: FSM
     except ValueError:
         await message.answer("❌ <b>Пожалуйста, введите корректную сумму за одну активацию чека</b>")
 
-@check_router.callback_query(F.data == 'enable_referral')
+@router.callback_query(F.data == 'enable_referral')
 async def enable_referral(callback: types.CallbackQuery, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.add(InlineKeyboardButton(text="25%", callback_data='referral_percent_25'))
@@ -89,7 +88,7 @@ async def enable_referral(callback: types.CallbackQuery, state: FSMContext):
     builder.add(InlineKeyboardButton(text="100%", callback_data='referral_percent_100'))
     await callback.message.edit_text("📊 <b>Выберите процент от суммы чека, который будут получать рефералы:</b>", reply_markup=builder.as_markup())
 
-@check_router.callback_query(F.data.startswith('referral_percent_'))
+@router.callback_query(F.data.startswith('referral_percent_'))
 async def set_referral_percent(callback: types.CallbackQuery, state: FSMContext):
     percent = int(callback.data.split('_')[-1])
     await state.update_data(referral_percent=percent)
@@ -100,7 +99,7 @@ async def set_referral_percent(callback: types.CallbackQuery, state: FSMContext)
     )
     await state.set_state(checks.set_ref_fund)
 
-@check_router.message(checks.set_ref_fund)
+@router.message(checks.set_ref_fund)
 async def handle_set_ref_fund(message: types.Message, state: FSMContext, bot: Bot):
     try:
         ref_fund = int(message.text)
@@ -181,7 +180,7 @@ async def handle_set_ref_fund(message: types.Message, state: FSMContext, bot: Bo
     except ValueError:
         await message.answer("❌ Пожалуйста, введите корректное число.", reply_markup=cancel_all_kb())
 
-@check_router.callback_query(F.data == 'disable_referral')
+@router.callback_query(F.data == 'disable_referral')
 async def disable_referral(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     # Получаем данные о чеке из состояния
     data = await state.get_data()
@@ -235,7 +234,7 @@ async def disable_referral(callback: types.CallbackQuery, state: FSMContext, bot
     )
     await state.clear()
 
-@check_router.callback_query(F.data.startswith('refill_ref_fund_'))
+@router.callback_query(F.data.startswith('refill_ref_fund_'))
 async def refill_ref_fund(callback: types.CallbackQuery, state: FSMContext):
     """
     Запрашивает у пользователя количество активаций для пополнения реферального фонда.
@@ -249,7 +248,7 @@ async def refill_ref_fund(callback: types.CallbackQuery, state: FSMContext):
     )
     await state.set_state(checks.refill_ref_fund)
 
-@check_router.message(checks.refill_ref_fund)
+@router.message(checks.refill_ref_fund)
 async def handle_refill_ref_fund(message: types.Message, state: FSMContext, bot: Bot):
     """
     Обрабатывает ввод пользователя и пополняет реферальный фонд.

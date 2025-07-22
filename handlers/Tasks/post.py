@@ -257,7 +257,7 @@ async def works_post_handler(callback: types.CallbackQuery, bot: Bot, state: FSM
                 "👀 <b>Вы просмотрели пост! +250 MITcoin</b>",
                 reply_markup=keyboard.as_markup()
             )
-
+            await update_dayly_and_weekly_tasks_statics(user_id)
             await DB.update_task_amount(task['id'], int(task['amount'])-1)
             updated_task = await DB.get_task_by_id(task['id'])
 

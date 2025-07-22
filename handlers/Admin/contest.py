@@ -103,7 +103,7 @@ async def process_prize_amount(message: types.Message, state: FSMContext):
         
         # Проверяем, все ли награды установлены
         if len(prizes) == data["winners_count"]:
-            await ask_contest_frequency(message, state)  # Изменено с ask_start_date
+            await ask_start_date(message, state)
         else:
             # Продолжаем устанавливать награды
             kb = InlineKeyboardBuilder()
@@ -178,35 +178,86 @@ async def ask_conditions(message: types.Message, state: FSMContext):
     
     kb = InlineKeyboardBuilder()
     
-    # Получаем текущие значения условий (по умолчанию False)
+    # Получаем текущие значения условий
     sub_channel = data.get("sub_channel", False)
+    channel_url = data.get("channel_url", "")
     is_bot_user = data.get("is_bot_user", False)
     is_active_user = data.get("is_active_user", False)
+    required_refs = data.get("required_refs", 0)
+    additional_channels = data.get("additional_channels", [])
     
     # Кнопки с галочками ✓
     kb.button(
         text=f"{'✓ ' if sub_channel else ''}Подписаться на канал", 
         callback_data="set_condition_sub_channel"
     )
+    
+    # Кнопки для дополнительных каналов
+    for i, channel in enumerate(additional_channels, 1):
+        kb.button(
+            text=f"✓ Доп. канал {i}",
+            callback_data=f"edit_additional_channel_{i}"
+        )
+    
+    kb.button(
+        text="➕ Добавить канал", 
+        callback_data="set_condition_additional_channel"
+    )
+    
     kb.button(
         text=f"{'✓ ' if is_bot_user else ''}Быть пользователем бота", 
         callback_data="set_condition_is_bot_user"
     )
+    
     kb.button(
         text=f"{'✓ ' if is_active_user else ''}Быть активным пользователем", 
         callback_data="set_condition_is_active_user"
     )
     
-    kb.button(text="✅ Готово", callback_data="conditions_done")
-    kb.adjust(1)
+    # Кнопки для управления количеством рефералов
+    kb.button(text="-", callback_data="decrease_refs")
+    kb.button(
+        text=f"{required_refs} рефералов" if required_refs > 0 else "Пригласить рефералов", 
+        callback_data="set_refs_count"
+    )
+    kb.button(text="+", callback_data="increase_refs")
     
-    # Устанавливаем общее состояние для выбора условий
-    await state.set_state(CreateContest.conditions)
+    kb.button(text="✅ Готово", callback_data="conditions_done")
+    
+    kb.adjust(1, 1, 1, 1, 3, 1)
+    
+    # Формируем текст с текущими каналами
+    channels_text = ""
+    if sub_channel:
+        channels_text += f"\n\nОсновной канал: {channel_url}"
+    if additional_channels:
+        channels_text += "\nДополнительные каналы:"
+        for i, channel in enumerate(additional_channels, 1):
+            channels_text += f"\n{i}. {channel}"
     
     await message.answer(
-        "Выберите условия участия (✓ — выбрано):",
+        f"Выберите условия участия (✓ — выбрано):{channels_text}",
         reply_markup=kb.as_markup()
     )
+    await state.set_state(CreateContest.conditions)
+
+
+@admin.callback_query(F.data == "increase_refs", CreateContest.conditions)
+async def increase_refs(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    current_refs = data.get("required_refs", 0)
+    await state.update_data(required_refs=current_refs + 1)
+    await ask_conditions(callback.message, state)
+    await callback.answer()
+
+@admin.callback_query(F.data == "decrease_refs", CreateContest.conditions)
+async def decrease_refs(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    current_refs = data.get("required_refs", 0)
+    new_refs = max(0, current_refs - 1)  # Не позволяем уходить ниже 0
+    await state.update_data(required_refs=new_refs)
+    await ask_conditions(callback.message, state)
+    await callback.answer()
 
 # Обработчики теперь работают в общем состоянии условий
 @admin.callback_query(F.data == "set_condition_sub_channel", CreateContest.conditions)
@@ -256,64 +307,6 @@ async def add_additional_channel(callback: types.CallbackQuery, state: FSMContex
     await state.update_data(editing_condition="additional_channel")
     await callback.answer()
 
-async def ask_conditions(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    
-    kb = InlineKeyboardBuilder()
-    
-    # Основные условия
-    sub_channel = data.get("sub_channel", False)
-    channel_url = data.get("channel_url", "")
-    is_bot_user = data.get("is_bot_user", False)
-    is_active_user = data.get("is_active_user", False)
-    
-    # Дополнительные каналы
-    additional_channels = data.get("additional_channels", [])
-    
-    # Кнопки с галочками ✓
-    kb.button(
-        text=f"{'✓ ' if sub_channel else ''}Подписаться на канал", 
-        callback_data="set_condition_sub_channel"
-    )
-    
-    # Кнопки для дополнительных каналов
-    for i, channel in enumerate(additional_channels, 1):
-        kb.button(
-            text=f"✓ Доп. канал {i}",
-            callback_data=f"edit_additional_channel_{i}"
-        )
-    
-    kb.button(
-        text="➕ Добавить канал", 
-        callback_data="set_condition_additional_channel"
-    )
-    
-    kb.button(
-        text=f"{'✓ ' if is_bot_user else ''}Быть пользователем бота", 
-        callback_data="set_condition_is_bot_user"
-    )
-    kb.button(
-        text=f"{'✓ ' if is_active_user else ''}Быть активным пользователем", 
-        callback_data="set_condition_is_active_user"
-    )
-    
-    kb.button(text="✅ Готово", callback_data="conditions_done")
-    kb.adjust(1)
-    
-    # Формируем текст с текущими каналами
-    channels_text = ""
-    if sub_channel:
-        channels_text += f"\n\nОсновной канал: {channel_url}"
-    if additional_channels:
-        channels_text += "\nДополнительные каналы:"
-        for i, channel in enumerate(additional_channels, 1):
-            channels_text += f"\n{i}. {channel}"
-    
-    await message.answer(
-        f"Выберите условия участия (✓ — выбрано):{channels_text}",
-        reply_markup=kb.as_markup()
-    )
-    await state.set_state(CreateContest.conditions)
 
 @admin.callback_query(F.data.startswith("edit_additional_channel_"), CreateContest.conditions)
 async def edit_additional_channel(callback: types.CallbackQuery, state: FSMContext):
@@ -361,12 +354,14 @@ async def conditions_done(callback: types.CallbackQuery, state: FSMContext):
     if data.get("is_active_user"):
         selected_conditions.append("is_active_user")
     
-    # Сохраняем дополнительные каналы
+    # Сохраняем дополнительные каналы и количество рефералов
     additional_channels = data.get("additional_channels", [])
+    required_refs = data.get("required_refs", 0)
     
     await state.update_data(
         conditions=selected_conditions,
-        additional_channels=additional_channels
+        additional_channels=additional_channels,
+        required_refs=required_refs
     )
     
     await callback.message.edit_text(
@@ -520,20 +515,16 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
         conditions = {
             "auto_conditions": data.get("conditions", []),
             "additional": data.get("additional_conditions", ""),
-            "additional_channels": data.get("additional_channels", [])
+            "additional_channels": data.get("additional_channels", []),
+            "required_refs": data.get("required_refs", 0)  # Добавляем количество рефералов
         }
         
         # Определяем статус конкурса
         start_date = data.get("start_date")
-        frequency = data.get("frequency", "once")
-        
-        if frequency == "once":
-            if start_date == "сразу" or start_date == datetime.now().strftime("%d.%m.%Y %H:%M"):
-                status = "active"
-            else:
-                status = "waiting"
+        if start_date == "сразу" or start_date == datetime.now().strftime("%d.%m.%Y %H:%M"):
+            status = "active"
         else:
-            status = "recurring"
+            status = "waiting"
         
         # Формируем данные конкурса
         contest_data = {
@@ -545,15 +536,21 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
             "conditions": json.dumps(conditions, ensure_ascii=False),
             "contest_text": data.get("contest_text", ""),
             "image_path": data.get("image_path"),
-            "status": status,
-            "frequency": frequency,
-            "selected_days": list(data.get("selected_days", [])),
-            "total_occurrences": data.get("total_occurrences", 1),
-            "current_occurrence": 1
+            "status": status
         }
 
         # Сохраняем конкурс в базу данных
-        contest_id = await Contest.create_recurring_contest(**contest_data)
+        contest_id = await Contest.create_contest(
+            channel_url=contest_data["channel_url"],
+            winners_count=contest_data["winners_count"],
+            prizes=json.dumps(contest_data["prizes"], ensure_ascii=False),
+            start_date=contest_data["start_date"],
+            end_date=contest_data["end_date"],
+            conditions=contest_data["conditions"],
+            contest_text=contest_data["contest_text"],
+            image_path=contest_data["image_path"],
+            status=contest_data["status"]
+        )
         
         # Если конкурс активный - публикуем сразу
         if status == "active":
@@ -606,19 +603,12 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
                 print(error_msg)
                 await callback.answer(error_msg, show_alert=True)
         else:
-            if frequency == "once":
-                await callback.answer(
-                    f"⏳ Конкурс запланирован на {contest_data['start_date']}. "
-                    "Он будет автоматически опубликован в указанное время.",
-                    show_alert=True
-                )
-            else:
-                await callback.answer(
-                    "✅ Регулярный конкурс успешно создан! "
-                    "Он будет автоматически публиковаться по расписанию.",
-                    show_alert=True
-                )
-                
+            await callback.answer(
+                f"⏳ Конкурс запланирован на {contest_data['start_date']}. "
+                "Он будет автоматически опубликован в указанное время.",
+                show_alert=True
+            )
+            
     except Exception as e:
         error_msg = f"❌ Критическая ошибка при создании конкурса: {str(e)}"
         print(error_msg)
@@ -644,6 +634,7 @@ async def generate_contest_text(contest_data, conditions):
     condition_number = 1
     
     auto_conditions = conditions.get("auto_conditions", [])
+    required_refs = conditions.get("required_refs", 0)
     
     # 3.1 Подписка на основной канал
     if "sub_channel" in auto_conditions:
@@ -673,16 +664,17 @@ async def generate_contest_text(contest_data, conditions):
             f"{condition_number}. 🔥 Быть активным участником сообщества\n"
         )
         condition_number += 1
+        
+    # 3.5 Пригласить рефералов
+    if required_refs > 0:
+        conditions_text += (
+            f"{condition_number}. 👥 Пригласить {required_refs} друзей\n"
+        )
+        condition_number += 1
 
-    # 3.5 Дополнительные условия
+    # 3.6 Дополнительные условия
     additional_conditions = conditions.get("additional", "")
-    if additional_conditions and additional_conditions != "-":
-        # Пробуем декодировать Unicode-последовательности
-        if "\\u" in additional_conditions:
-            try:
-                additional_conditions = additional_conditions.encode().decode("unicode-escape")
-            except Exception:
-                pass
+    if additional_conditions and additional_conditions != '-':
         conditions_text += f"{condition_number}. 📌 {additional_conditions}\n"
 
     # 4. Формируем финальный текст конкурса
@@ -1151,205 +1143,4 @@ async def activate_contest(contest: dict, bot: Bot):
         await Contest.update_contest_status(contest['id'], 'error')
     except Exception as e:
         print(f"Неизвестная ошибка при активации конкурса {contest['id']}: {e}")
-        await Contest.update_contest_status(contest['id'], 'error')
-
-
-
-
-
-
-
-async def ask_contest_frequency(message: types.Message, state: FSMContext):
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Одноразовый", callback_data="frequency_once")
-    kb.button(text="Ежедневный", callback_data="frequency_daily")
-    kb.button(text="Еженедельный", callback_data="frequency_weekly")
-    kb.adjust(1)
-    
-    await message.answer(
-        "Выберите частоту проведения конкурса:",
-        reply_markup=kb.as_markup()
-    )
-    await state.set_state(CreateContest.contest_frequency)
-
-@admin.callback_query(F.data.startswith("frequency_"), CreateContest.contest_frequency)
-async def process_frequency(callback: types.CallbackQuery, state: FSMContext):
-    frequency = callback.data.split("_")[1]
-    await state.update_data(frequency=frequency)
-    
-    if frequency == "once":
-        await ask_start_date(callback.message, state)
-    elif frequency == "daily":
-        await callback.message.answer(
-            "Введите количество дней, в течение которых будет повторяться конкурс:"
-        )
-        await state.set_state(CreateContest.total_occurrences)
-    elif frequency == "weekly":
-        await ask_days_of_week(callback.message, state)
-
-async def ask_days_of_week(message: types.Message, state: FSMContext):
-    kb = InlineKeyboardBuilder()
-    days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-    for i, day in enumerate(days, 1):
-        kb.button(text=day, callback_data=f"day_{i}")
-    kb.button(text="✅ Готово", callback_data="days_done")
-    kb.adjust(7)
-    
-    await message.answer(
-        "Выберите дни недели для проведения конкурса:",
-        reply_markup=kb.as_markup()
-    )
-    await state.set_state(CreateContest.days_of_week)
-
-@admin.callback_query(F.data.startswith("day_"), CreateContest.days_of_week)
-async def toggle_day(callback: types.CallbackQuery, state: FSMContext):
-    day_num = int(callback.data.split("_")[1])
-    data = await state.get_data()
-    selected_days = data.get("selected_days", set())
-    
-    if day_num in selected_days:
-        selected_days.remove(day_num)
-    else:
-        selected_days.add(day_num)
-    
-    await state.update_data(selected_days=selected_days)
-    await callback.answer(f"День {day_num} {'добавлен' if day_num in selected_days else 'удален'}")
-
-@admin.callback_query(F.data == "days_done", CreateContest.days_of_week)
-async def days_selected(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    if not data.get("selected_days"):
-        await callback.answer("Выберите хотя бы один день", show_alert=True)
-        return
-    
-    await callback.message.answer(
-        "Введите количество недель, в течение которых будет повторяться конкурс:"
-    )
-    await state.set_state(CreateContest.total_occurrences)
-
-@admin.message(CreateContest.total_occurrences)
-async def process_total_occurrences(message: types.Message, state: FSMContext):
-    try:
-        occurrences = int(message.text)
-        if occurrences <= 0:
-            raise ValueError
-        await state.update_data(total_occurrences=occurrences)
-        await ask_start_date(message, state)
-    except ValueError:
-        await message.answer("Пожалуйста, введите корректное положительное число!")
-
-
-async def check_recurring_contests(bot: Bot):
-    """Проверяет и запускает регулярные конкурсы по расписанию"""
-    while True:
-        try:
-            now = datetime.now()
-            current_time = now.strftime("%H:%M")
-            current_weekday = now.weekday() + 1  # 1-7, где 1-пн, 7-вс
-            
-            # Получаем активные регулярные конкурсы
-            recurring_contests = await Contest.get_active_recurring_contests()
-            
-            for contest in recurring_contests:
-                contest_id = contest['id']
-                frequency = contest['frequency']
-                start_time = contest['start_time']  # В формате "HH:MM"
-                selected_days = contest['selected_days'] or []
-                last_run = contest['last_run']
-                current_occurrence = contest['current_occurrence']
-                total_occurrences = contest['total_occurrences']
-                
-                # Проверяем, нужно ли запускать конкурс сегодня
-                should_run = False
-                
-                if frequency == "daily":
-                    # Для ежедневных - проверяем время
-                    should_run = current_time == start_time
-                    
-                elif frequency == "weekly":
-                    # Для еженедельных - проверяем день недели и время
-                    should_run = (current_weekday in selected_days and 
-                                current_time == start_time)
-                
-                # Проверяем, не превышено ли количество запусков
-                if current_occurrence >= total_occurrences:
-                    await Contest.update_contest_status(contest_id, "finished")
-                    continue
-                
-                # Проверяем, не запускали ли уже сегодня
-                if last_run and last_run.date() == now.date():
-                    continue
-                
-                if should_run:
-                    try:
-                        # Клонируем конкурс для нового запуска
-                        new_contest_id = await Contest.clone_contest_for_recurring_run(contest_id)
-                        
-                        # Публикуем конкурс
-                        await publish_recurring_contest(bot, contest, new_contest_id)
-                        
-                        # Обновляем данные оригинального конкурса
-                        await Contest.update_recurring_contest_after_run(
-                            contest_id, 
-                            current_occurrence + 1,
-                            now
-                        )
-                        
-                    except Exception as e:
-                        print(f"Ошибка при запуске регулярного конкурса {contest_id}: {e}")
-            
-            await asyncio.sleep(60)  # Проверяем каждую минуту
-            
-        except Exception as e:
-            print(f"Критическая ошибка в check_recurring_contests: {e}")
-            await asyncio.sleep(300)  # При ошибке ждем 5 минут
-
-async def publish_recurring_contest(bot: Bot, contest_data: dict, contest_id: int):
-    """Публикует регулярный конкурс в канале"""
-    try:
-        # Формируем текст конкурса
-        conditions = json.loads(contest_data['conditions'])
-        contest_text = await generate_contest_text(contest_data, conditions)
-        
-        # Создаем кнопку "Участвовать"
-        bot_username = (await bot.get_me()).username
-        participate_kb = InlineKeyboardBuilder()
-        participate_kb.button(
-            text="🎁 Участвовать", 
-            url=f"https://t.me/{bot_username}?start=contest_{contest_id}"
-        )
-        
-        # Получаем username канала
-        channel_url = contest_data['channel_url']
-        channel_username = channel_url.replace("@", "").replace("https://t.me/", "")
-        
-        # Проверяем наличие изображения
-        image_path = contest_data.get('image_path')
-        
-        if image_path and os.path.exists(image_path):
-            with open(image_path, 'rb') as photo:
-                # Отправляем сообщение с фото
-                message = await bot.send_photo(
-                    chat_id=f"@{channel_username}",
-                    photo=types.BufferedInputFile(photo.read(), filename="contest.jpg"),
-                    caption=contest_text,
-                    reply_markup=participate_kb.as_markup(),
-                    parse_mode="HTML"
-                )
-        else:
-            # Отправляем текстовое сообщение
-            message = await bot.send_message(
-                chat_id=f"@{channel_username}",
-                text=contest_text,
-                reply_markup=participate_kb.as_markup(),
-                parse_mode="HTML"
-            )
-        
-        # Сохраняем данные сообщения
-        await Contest.update_contest_message_id(contest_id, message.message_id)
-        await Contest.update_contest_message_text(contest_id, contest_text)
-        await Contest.update_contest_status(contest_id, "active")
-        
-    except Exception as e:
-        print(f"Ошибка при публикации регулярного конкурса: {e}")
-        await Contest.update_contest_status(contest_id, "error")
+        await Contest.update_contest_status(contest['id'], 'error') 

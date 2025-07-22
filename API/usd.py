@@ -1,25 +1,36 @@
-from aiocryptopay import AioCryptoPay, Networks
-import asyncio
-import time
-from config import CRYPTOBOT_TOKEN
+from utils.Imports import *
+from datetime import datetime
 
-
-async def create_invoice(amount: float, purpose='', asset: str = 'USDT') -> dict:
+async def create_invoice(amount: float, user_id: int, purpose='', asset: str = 'USDT') -> dict:
     """
-    Создает счет для оплаты
+    Создает счет для оплаты с записью в БД
     :param amount: Сумма платежа
-    :param user_id: ID пользователя (для описания)
+    :param user_id: ID пользователя
+    :param purpose: Назначение платежа
     :param asset: Криптовалюта (по умолчанию USDT)
     :return: Словарь с данными счета (invoice_id, bot_invoice_url, expires_in)
-    """
+    """ 
     try:
         crypto = AioCryptoPay(token=CRYPTOBOT_TOKEN)
 
         invoice = await crypto.create_invoice(
             amount=amount,
-            description=purpose,
+            description=purpose or f"Deposit for user {user_id}",
             asset=asset,
             expires_in=180  # 3 минуты в секундах
+        )
+        
+        # Generate unique order ID
+        order_id = f"crypto_{int(time.time())}_{user_id}"
+        
+        # Save deposit record
+        await DB.add_deposit(
+            user_id=user_id,
+            amount=amount,
+            unique_id=order_id,
+            status='pending',
+            service='cryptobot',
+            item=asset
         )
         
         return {
@@ -27,7 +38,8 @@ async def create_invoice(amount: float, purpose='', asset: str = 'USDT') -> dict
             'url': invoice.bot_invoice_url,
             'status': invoice.status,
             'amount': invoice.amount,
-            'asset': invoice.asset
+            'asset': invoice.asset,
+            'order_id': order_id  # Return order_id for reference
         }
     except Exception as e:
         print(f"Error creating invoice: {e}")
@@ -61,10 +73,11 @@ async def create_check(amount: float, user_id: int, asset: str = 'USDT') -> dict
         print(f"Error creating check: {e}")
         return None
 
-async def check_payment_status(invoice_id: int, purpose = '', timeout: int = 180) -> bool:
+async def check_payment_status(invoice_id: int, order_id: str = None, timeout: int = 180) -> bool:
     """
-    Проверяет статус оплаты счета
+    Проверяет статус оплаты счета и обновляет БД
     :param invoice_id: ID счета для проверки
+    :param order_id: ID заказа в системе (для обновления БД)
     :param timeout: Время ожидания оплаты в секундах (по умолчанию 180)
     :return: True если оплачено, False если не оплачено или время истекло
     """
@@ -74,26 +87,39 @@ async def check_payment_status(invoice_id: int, purpose = '', timeout: int = 180
         invoice = await crypto.get_invoices(invoice_ids=invoice_id)
         
         if invoice.status == 'paid':
+            # Update deposit status if order_id is provided
+            if order_id:
+                deposit = await DB.get_deposit(order_id)
+                if deposit:
+                    await DB.update_deposit(
+                        deposit['deposit_id'],
+                        status='paid'#,
+                        # updated_at=datetime.now().isoformat()
+                    )
             return True
         return False
     except Exception as e:
         print(f"Error checking invoice status: {e}")
+        return False
 
 
 # Пример использования
 async def main():
-    # Создание счета
-    crypto = AioCryptoPay(token=CRYPTOBOT_TOKEN)
-    invoice = await create_invoice(10.50, 123456)
+    user_id = 123456
+    
+    invoice = await create_invoice(10.50, user_id, "Test deposit")
     if invoice:
-        print(f"Счет создан: {invoice['payment_url']}")
+        print(f"Счет создан: {invoice['url']}")
+        print(f"Order ID: {invoice['order_id']}")
         
-        # Проверка оплаты
-        is_paid = await check_payment_status(invoice['invoice_id'])
-        print(f"Оплачен: {is_paid}")
+        # Проверка оплаты с обновлением БД
+        status = await check_payment_status(invoice['id'], invoice['order_id'])
+        print(f"Статус: {status}")
     
     # Создание чека
-    check = await create_check(5.25, 123456)
+    check = await create_check(5.25, user_id)
     if check:
         print(f"Чек создан: {check['check_url']}")
 
+if __name__ == "__main__":
+    asyncio.run(main()) 

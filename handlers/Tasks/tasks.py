@@ -62,10 +62,30 @@ async def pr_menu_handler(callback: types.CallbackQuery, bot: Bot):
             reply_markup=keyboard.as_markup()
         )
     else:
-
         await callback.answer()
+        # Показываем меню выбора типа аудитории
         await callback.message.edit_text(
-            "📋 <b>В данном разделе вы можете создать свои задания</b>\nЧто нужно рекламировать?", reply_markup=pr_menu_kb(user_id))
+            "📋 <b>Выберите тип аудитории для задания:</b>",
+            reply_markup=audience_type_kb()
+        )
+
+def audience_type_kb():
+    """Клавиатура выбора типа аудитории"""
+    ikb = InlineKeyboardBuilder()
+    ikb.button(text="👥 Реальные люди", callback_data='real_people_menu')
+    ikb.button(text="🤖 Боты", callback_data='bots_menu')
+    ikb.button(text="Назад 🔙", callback_data='back_menu')
+    ikb.adjust(1)
+    return ikb.as_markup()
+
+# Обработчики для новых пунктов меню
+@tasks.callback_query(F.data == 'real_people_menu')
+async def real_people_menu_handler(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(
+        "📋 <b>В данном разделе вы можете создать свои задания</b>\nЧто нужно рекламировать?", 
+        reply_markup=pr_menu_kb(callback.from_user.id)
+    )
 
 @tasks.callback_query(F.data == 'pr_menu_cancel')
 async def cancel_pr(callback: types.CallbackQuery, state: FSMContext, bot: Bot):

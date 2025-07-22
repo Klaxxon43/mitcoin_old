@@ -30,7 +30,7 @@ async def _(message: types.Message):
 
 @router.message(Command('msg'))
 async def send_message_to_user(message: types.Message, bot: Bot):
-    from config import ADMINS_ID
+    from confIg import ADMINS_ID
     
     if message.from_user.id not in ADMINS_ID:
         await message.reply("⚠️ У вас нет прав для выполнения этой команды.")
@@ -116,7 +116,7 @@ async def send_report(message: types.Message, bot: Bot):
 📝 <b>Текст репорта:</b>
 <blockquote>{report_text}</blockquote>"""
         )
-        from config import ADMINS_ID
+        from confIg import ADMINS_ID
         # Отправляем сообщение всем админам
         for admin_id in ADMINS_ID:
             try:

@@ -1,6 +1,6 @@
 from .tasks import *
 from handlers.client import *
-from handlers.client.client import check_admin_and_get_invite_link
+from handlers.client.my_works import check_admin_and_get_invite_link
 
 @tasks.callback_query(F.data == 'work_chating')
 async def chating_tasks_handler(callback: types.CallbackQuery, bot: Bot):
@@ -37,7 +37,7 @@ async def vchange_page_handler(callback: types.CallbackQuery, bot: Bot):
     
 
 
-@router.callback_query(lambda c: c.data.startswith("vchatingtask_"))
+@tasks.callback_query(lambda c: c.data.startswith("vchatingtask_"))
 async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
     await callback.answer()
     task_id = int(callback.data.split('_')[1])

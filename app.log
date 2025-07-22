@@ -1,0 +1,39 @@
+2025-07-22 11:47:38,227 - __main__ - INFO - Starting application
+2025-07-22 11:47:38,307 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.143:5000
+2025-07-22 11:47:38,308 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-07-22 11:47:38,310 - werkzeug - INFO -  * Restarting with stat
+2025-07-22 11:47:39,214 - __main__ - INFO - Starting application
+2025-07-22 11:47:39,244 - werkzeug - WARNING -  * Debugger is active!
+2025-07-22 11:47:39,251 - werkzeug - INFO -  * Debugger PIN: 278-618-168
+2025-07-22 11:47:44,077 - __main__ - INFO - Rendering home page
+2025-07-22 11:47:44,177 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:47:44] "GET / HTTP/1.1" 200 -
+2025-07-22 11:47:44,401 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:47:44] "GET /static/images/home-icon.png HTTP/1.1" 200 -
+2025-07-22 11:47:44,402 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:47:44] "GET /static/css/base.css HTTP/1.1" 200 -
+2025-07-22 11:47:44,402 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:47:44] "GET /static/images/home-active.png HTTP/1.1" 200 -
+2025-07-22 11:47:44,437 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:47:44] "GET /static/images/profile-icon.png HTTP/1.1" 200 -
+2025-07-22 11:47:44,443 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:47:44] "GET /static/images/profile-active.png HTTP/1.1" 200 -
+2025-07-22 11:47:44,472 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:47:44] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-07-22 11:47:44,945 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:47:44] "[33mGET /auth_redirect HTTP/1.1[0m" 404 -
+2025-07-22 11:47:45,092 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:47:45] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2025-07-22 11:48:37,153 - __main__ - INFO - Rendering home page
+2025-07-22 11:48:37,155 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:37] "GET / HTTP/1.1" 200 -
+2025-07-22 11:48:37,213 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:37] "[36mGET /static/css/base.css HTTP/1.1[0m" 304 -
+2025-07-22 11:48:37,231 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:37] "[36mGET /static/images/home-icon.png HTTP/1.1[0m" 304 -
+2025-07-22 11:48:37,232 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:37] "[36mGET /static/images/home-active.png HTTP/1.1[0m" 304 -
+2025-07-22 11:48:37,243 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:37] "[36mGET /static/images/profile-icon.png HTTP/1.1[0m" 304 -
+2025-07-22 11:48:37,247 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:37] "[36mGET /static/images/profile-active.png HTTP/1.1[0m" 304 -
+2025-07-22 11:48:37,249 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:37] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-07-22 11:48:37,281 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:37] "[33mGET /auth_redirect HTTP/1.1[0m" 404 -
+2025-07-22 11:48:38,892 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:38] "[33mGET /auth_redirect HTTP/1.1[0m" 404 -
+2025-07-22 11:48:42,194 - __main__ - INFO - Rendering home page
+2025-07-22 11:48:42,195 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "GET / HTTP/1.1" 200 -
+2025-07-22 11:48:42,252 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[36mGET /static/css/base.css HTTP/1.1[0m" 304 -
+2025-07-22 11:48:42,270 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[36mGET /static/images/home-icon.png HTTP/1.1[0m" 304 -
+2025-07-22 11:48:42,270 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[36mGET /static/images/home-active.png HTTP/1.1[0m" 304 -
+2025-07-22 11:48:42,281 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[36mGET /static/images/profile-icon.png HTTP/1.1[0m" 304 -
+2025-07-22 11:48:42,285 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[36mGET /static/images/profile-active.png HTTP/1.1[0m" 304 -
+2025-07-22 11:48:42,289 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-07-22 11:48:42,328 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[33mGET /auth_redirect HTTP/1.1[0m" 404 -

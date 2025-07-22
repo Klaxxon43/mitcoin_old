@@ -1,5 +1,5 @@
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from config import ADMINS_ID
+from confIg import ADMINS_ID
 
 def admin_kb():
     """Главное меню админ-панели"""
@@ -126,7 +126,7 @@ def work_menu_kb(user_id):
     ikb = InlineKeyboardBuilder()
     ikb.button(text="🔥 Написать в чат", callback_data="work_chating")
     ikb.button(text="🔗 Шилл", url="https://telegra.ph/SHill-zadaniya-12-02")
-    ikb.button(text="🌟 Продать звезды", callback_data="buy_stars")
+    # ikb.button(text="🌟 Продать звезды", callback_data="buy_stars")
     ikb.button(text=f"📢 Канал | +{all_price['channel']}", callback_data="work_chanel")
     ikb.button(text=f"👥 Чат | +{all_price['chat']}", callback_data="work_chat")
     ikb.button(text=f"👀 Пост | +{all_price['post']}", callback_data="work_post")
@@ -135,7 +135,7 @@ def work_menu_kb(user_id):
     ikb.button(text=f"🤖 Перейти в бота | +{all_price['link']}", callback_data="work_link")
     ikb.button(text=f"⭐️ Буст канала | +{all_price['boost']}", callback_data="work_boost")  
     ikb.button(text="Назад 🔙", callback_data='back_menu')
-    ikb.adjust(2)
+    ikb.adjust(2, 2, 2, 2, 1, 1)
     return ikb.as_markup() 
 
 def menu_kb(user_id):
@@ -144,15 +144,15 @@ def menu_kb(user_id):
     ikb.button(text='👥 Рекламировать', callback_data='pr_menu')
     ikb.button(text='📄 ОП', callback_data='op_help_menu')
     ikb.button(text='💻 Профиль', callback_data='profile')
-    ikb.button(text='🔄 Конвертация', callback_data='corvertation')
+    ikb.button(text='🔄 Конвертация', callback_data='convertation')
     ikb.button(text='💸 Чеки', callback_data='checks_menu')
     ikb.button(text='👀 Статистика', callback_data='menu_stats')
     ikb.button(text='🎁 Бонус', callback_data='bonus_menu')
     ikb.button(text='⛏️ Майнинг', callback_data='mining')
     ikb.button(text='О проекте 💎', callback_data='support')
     ikb.button(text='⭐️ Купить звёзды', callback_data='BuyStars')
+
     if user_id in ADMINS_ID:
-        ikb.button(text='Накрутка', callback_data='bots_menu')
         ikb.button(text='АДМИН МЕНЮ', callback_data='admin_back')
 
 
@@ -174,7 +174,7 @@ def pr_menu_kb(user_id):
     ikb.button(text="📣 Рассылка", callback_data='rasslka_menu')
     ikb.button(text="📖 Мои задания", callback_data='my_works')
     ikb.button(text="❗️Инструкция", url='https://teletype.in/@klaxxon_off/hVNvmcEkKmb')
-    ikb.button(text="Назад 🔙", callback_data='back_menu')
+    ikb.button(text="Назад 🔙", callback_data='pr_menu')
     ikb.adjust(2, 2, 2, 2, 1, 1)
     return ikb.as_markup()
 

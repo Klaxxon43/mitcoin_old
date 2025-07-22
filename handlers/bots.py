@@ -10,6 +10,7 @@ bots = Router()
 task_cache = {}
 task_cache_chat = {}
 
+PRICE_MARKUP = 3  # 30% наценка
 
 
 # Генерация уникального кода для TON транзакций
@@ -223,14 +224,14 @@ async def update_services_cache():
         logger.error(f"Error updating services cache: {e}")
 
 @bots.callback_query(F.data == "bots_menu")
-async def show_bots_menu(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+async def show_bots_menu(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
 
     from handlers.client.client import check_subs_op
     if not await check_subs_op(user_id, bot):
         return
     
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     
@@ -249,7 +250,7 @@ async def show_bots_menu(callback: types.CallbackQuery, state: FSMContext, bot: 
     
     # Кнопка реакций
     builder.button(text="❤️ Реакции", callback_data="bots_reactions")
-    builder.button(text='🔙 Назад', callback_data='back_menu')
+    builder.button(text='🔙 Назад', callback_data='pr_menu')
     builder.adjust(1)
     
     await callback.message.edit_text(
@@ -289,38 +290,44 @@ async def show_reactions_menu(callback: types.CallbackQuery):
     )
     await callback.answer()
 
+
+# Добавим новое состояние для оформления заказа
+class OrderStates(StatesGroup):
+    AWAITING_LINK = State()
+    AWAITING_QUANTITY = State()
+    VIEW_ORDERS = State()
+    PAYMENT_METHOD = State()
+    AWAITING_PAYMENT = State()
+
 @bots.callback_query(F.data.startswith("bots_srv_"))
 async def show_service_details(callback: types.CallbackQuery):
     service_id = int(callback.data.replace("bots_srv_", ""))
     
-    # Пытаемся получить данные из кэша
-    service = None
-    if service_id in PREMIUM_SERVICES.values() and SERVICES_CACHE['premium']:
-        service = SERVICES_CACHE['premium'].get(service_id)
-    elif service_id in REACTION_SERVICES.values() and SERVICES_CACHE['reactions']:
-        service = SERVICES_CACHE['reactions'].get(service_id)
-    
-    # Если в кэше нет данных, запрашиваем из API
+    # Получаем данные услуги
+    service = await BotsAPI.get_service(service_id)
     if not service:
-        try:
-            service = await BotsAPI.get_service(service_id)
-        except Exception as e:
-            logger.error(f"Error getting service {service_id}: {e}")
-            await callback.answer("⚠️ Ошибка при загрузке услуги")
-            return
-    
-    if not service:
-        await callback.answer("⚠️ Услуга не найдена")
+        await callback.answer("⚠️ Услуга временно недоступна")
         return
     
-    description = SERVICE_DESCRIPTIONS.get(service_id, f"""
+    # Получаем описание из SERVICE_DESCRIPTIONS
+    service_description = SERVICE_DESCRIPTIONS.get(service_id, "")
+    
+    # Извлекаем цену из описания
+    price_line = next((line for line in service_description.split('\n') if line.startswith('💵 Стоимость:')), None)
+    marked_up_price = float(price_line.split(': ')[1].split(' руб')[0]) if price_line else float(service['rate']) * PRICE_MARKUP
+    
+    # Используем описание из SERVICE_DESCRIPTIONS или генерируем его
+    if service_description:
+        description = service_description
+    else:
+        description = f"""
 📌 Услуга #{service['service']}
 🏷 Название: {service['name']}
-💵 Стоимость: {service['rate']} за единицу
+💵 Стоимость: {marked_up_price:.2f} руб. за 1000 единиц
 📊 Лимиты: {service['min']} - {service['max']}
 🚀 Скорость: {'Моментально' if not service['dripfeed'] else 'Постепенно'}
 🛡 Гарантия: {'Есть' if service['refill'] else 'Нет'}
-""")
+""".strip()
     
     builder = InlineKeyboardBuilder()
     builder.button(text="🛒 Купить", callback_data=f"buy_{service_id}")
@@ -334,26 +341,11 @@ async def show_service_details(callback: types.CallbackQuery):
     
     await callback.message.edit_text(
         description,
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
+        reply_markup=builder.as_markup()
     )
     await callback.answer()
 
-# Обработчик возврата в главное меню
-@bots.callback_query(F.data == "bots_back_to_main")
-async def back_to_main_menu(callback: types.CallbackQuery):
-    await show_bots_menu(callback, None)
-    await callback.answer()
 
-# Добавим новое состояние для оформления заказа
-class OrderStates(StatesGroup):
-    AWAITING_LINK = State()
-    AWAITING_QUANTITY = State()
-    VIEW_ORDERS = State()
-    PAYMENT_METHOD = State()
-    AWAITING_PAYMENT = State()
-
-# Обновим обработчик покупки
 @bots.callback_query(F.data.startswith("buy_"))
 async def start_order_process(callback: types.CallbackQuery, state: FSMContext):
     service_id = int(callback.data.replace("buy_", ""))
@@ -364,12 +356,20 @@ async def start_order_process(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("⚠️ Услуга временно недоступна")
         return
     
+    # Получаем описание из SERVICE_DESCRIPTIONS
+    service_description = SERVICE_DESCRIPTIONS.get(service_id, "")
+    
+    # Извлекаем цену из описания
+    price_line = next((line for line in service_description.split('\n') if line.startswith('💵 Стоимость:')), None)
+    marked_up_rate = float(price_line.split(': ')[1].split(' руб')[0]) if price_line else float(service['rate']) * PRICE_MARKUP
+    
     await state.update_data(
         service_id=service_id,
         service_name=service['name'],
         min_quantity=int(service['min']),
         max_quantity=int(service['max']),
-        rate=float(service['rate'])
+        original_rate=float(service['rate']),  # Оригинальная цена за 1000
+        marked_up_rate=marked_up_rate  # Цена с наценкой за 1000 из SERVICE_DESCRIPTIONS
     )
     
     await callback.message.edit_text(
@@ -400,13 +400,12 @@ async def process_link(message: types.Message, state: FSMContext):
         f"🔢 <b>Введите количество:</b>\n\n"
         f"• Минимум: {data['min_quantity']}\n"
         f"• Максимум: {data['max_quantity']}\n"
-        f"• Цена за 1000: {data['rate']} руб.",
+        f"• Цена за 1000: {data['marked_up_rate']} руб.",
         parse_mode="HTML"
     )
     
     await state.set_state(OrderStates.AWAITING_QUANTITY)
 
-# Обработчик ввода количества
 @bots.message(OrderStates.AWAITING_QUANTITY)
 async def process_quantity(message: types.Message, state: FSMContext):
     try:
@@ -423,22 +422,26 @@ async def process_quantity(message: types.Message, state: FSMContext):
         )
         return
     
-    # Рассчитываем стоимость
-    cost = round(quantity * data['rate'] / 1000, 2)
+    # Рассчитываем стоимость с наценкой
+    cost = round(quantity * data['marked_up_rate'] / 1000, 2)
+    original_cost = round(quantity * data['original_rate'] / 1000, 2)
+    profit = cost - original_cost
     
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Подтвердить", callback_data="confirm_order")
     builder.button(text="❌ Отменить", callback_data="cancel_order")
     builder.adjust(2)
     
-    await state.update_data(quantity=quantity, cost=cost)
+    await state.update_data(quantity=quantity, cost=cost, profit=profit)
     
     await message.answer(
         f"📝 <b>Подтвердите заказ:</b>\n\n"
         f"• Услуга: {data['service_name']}\n"
         f"• Ссылка: {data['link']}\n"
         f"• Количество: {quantity}\n"
-        f"• Стоимость: {cost} руб.\n\n"
+        f"• Цена за 1000: {data['marked_up_rate']:.2f} руб.\n"
+        # f"• Прибыль с продажи: {profit:.2f} руб.\n"
+        f"• Стоимость: {cost:.2f} руб.\n\n"
         f"После оплаты заказ начнет выполняться автоматически.",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
@@ -447,7 +450,9 @@ async def process_quantity(message: types.Message, state: FSMContext):
 # Обработчик отмены заказа
 @bots.callback_query(F.data == "cancel_order", OrderStates.AWAITING_QUANTITY)
 async def cancel_order(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("❌ Заказ отменен")
+    kb = InlineKeyboardBuilder()
+    kb.button(text='🔙 Назад', callback_data='bots_menu')
+    await callback.message.edit_text("❌ Заказ отменен", kb.as_markup())
     await state.clear()
     await callback.answer()
 
@@ -458,8 +463,9 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
     
     # Показываем меню выбора способа оплаты
     builder = InlineKeyboardBuilder()
-    builder.button(text="💳 CryptoBot (USDT)", callback_data="pay_cryptobot")
-    builder.button(text="💎 TON", callback_data="pay_ton")
+    # builder.button(text="💳 CryptoBot (USDT)", callback_data="pay_cryptobot")
+    # builder.button(text="💎 TON", callback_data="bots_pay_ton")
+    builder.button(text="💎 Оплатить с баланса", callback_data="bot_pay_from_balance")
     builder.button(text="🔙 Назад", callback_data="back_to_order_confirmation")
     builder.adjust(1)
     
@@ -473,29 +479,124 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(OrderStates.PAYMENT_METHOD)
     await callback.answer()
 
-# Обработчик возврата к подтверждению заказа
-@bots.callback_query(F.data == "back_to_order_confirmation", OrderStates.PAYMENT_METHOD)
-async def back_to_order_confirmation(callback: types.CallbackQuery, state: FSMContext):
+
+@bots.callback_query(F.data == "bot_pay_from_balance", OrderStates.PAYMENT_METHOD)
+async def bot_pay_from_balance(callback: types.CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id 
     data = await state.get_data()
     
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Подтвердить", callback_data="confirm_order")
-    builder.button(text="❌ Отменить", callback_data="cancel_order")
-    builder.adjust(2)
+    # Рассчитываем стоимость с наценкой
+    marked_up_cost = data['cost']  # Общая стоимость с наценкой
+    original_cost = (data['original_rate'] * data['quantity']) / 1000  # Общая стоимость по базовой цене
+    profit = marked_up_cost - original_cost  # Общая прибыль
     
+    user_balance = await DB.get_user_rub_balance(user_id)
+    
+    if user_balance < marked_up_cost:
+        btn = InlineKeyboardBuilder()
+        btn.button(text='💸 К пополнению', callback_data='select_deposit_menu')
+        btn.button(text='🔙 В меню', callback_data='back_menu')
+        await callback.message.edit_text(
+            f'❌ Недостаточно средств для оплаты услуги ❌\n'
+            f'💰 Требуется: {marked_up_cost:.2f} руб.\n'
+            f'💳 На балансе: {user_balance:.2f} руб.\n'
+            f'Пополните баланс и возвращайтесь снова!', 
+            reply_markup=btn.as_markup()
+        )
+        await callback.answer()
+        return
+    
+    # Списываем деньги (уже с наценкой)
+    await DB.add_rub_balance(user_id, -marked_up_cost)
+    
+    # Создаем заказ
+    order_result = await BotsAPI.create_order(
+        service_id=data['service_id'],
+        link=data['link'],
+        quantity=data['quantity']
+    )
+    
+    if not order_result or 'order' not in order_result:
+        # Возвращаем деньги при ошибке
+        await DB.add_rub_balance(user_id, marked_up_cost)
+        await callback.message.edit_text("❌ Ошибка при создании заказа. Попробуйте позже.")
+        await state.clear()
+        await callback.answer()
+        return
+    
+    order_id = order_result['order']
+    await DB.add_order(
+        user_id=user_id,
+        order_id=order_id,
+        service_id=data['service_id'],
+        link=data['link'],
+        quantity=data['quantity'],
+        cost=marked_up_cost,  # Сохраняем общую стоимость с наценкой
+        status='pending',
+    )
+    
+    # Получаем название услуги
+    service = await BotsAPI.get_service(data['service_id'])
+    service_name = service['name'] if service else f"Услуга #{data['service_id']}"
+    
+    # Отправляем уведомление админам
+    admin_message = (
+        f"💰 <b>Новый заказ #{order_id}</b>\n"
+        f"👤 Пользователь: @{callback.from_user.username or 'нет'} (ID: {user_id})\n"
+        f"📌 Услуга: {service_name}\n"
+        f"🔗 Ссылка: {data['link']}\n"
+        f"🔢 Количество: {data['quantity']}\n"
+        f"💵 Цена из API: {original_cost:.2f} руб.\n"
+        f"💰 Цена продажи: {marked_up_cost:.2f} руб.\n"
+        f"💸 Прибыль: {profit:.2f} руб.\n"
+    )
+    
+    for admin_id in ADMINS_ID:
+        try:
+            await callback.bot.send_message(
+                chat_id=admin_id,
+                text=admin_message,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление админу {admin_id}: {e}")
+    
+    # Отправляем сообщение пользователю
     await callback.message.edit_text(
-        f"📝 <b>Подтвердите заказ:</b>\n\n"
-        f"• Услуга: {data['service_name']}\n"
+        f"✅ <b>Заказ #{order_id} успешно создан!</b>\n\n"
+        f"• Услуга: {service_name}\n"
         f"• Ссылка: {data['link']}\n"
         f"• Количество: {data['quantity']}\n"
-        f"• Стоимость: {data['cost']} руб.\n\n"
-        f"После оплаты заказ начнет выполняться автоматически.",
-        reply_markup=builder.as_markup(),
+        f"• Стоимость: {marked_up_cost:.2f} руб.\n\n"
+        f"Статус заказа можно проверить командой /orders",
         parse_mode="HTML"
     )
     
-    await state.set_state(OrderStates.AWAITING_QUANTITY)
-    await callback.answer()
+    await state.clear()
+
+# # Обработчик возврата к подтверждению заказа
+# @bots.callback_query(F.data == "back_to_order_confirmation", OrderStates.PAYMENT_METHOD)
+# async def back_to_order_confirmation(callback: types.CallbackQuery, state: FSMContext):
+#     data = await state.get_data()
+    
+#     builder = InlineKeyboardBuilder()
+#     builder.button(text="✅ Подтвердить", callback_data="confirm_order")
+#     builder.button(text="❌ Отменить", callback_data="cancel_order")
+#     builder.adjust(2)
+    
+#     await callback.message.edit_text(
+#         f"📝 <b>Подтвердите заказ:</b>\n\n"
+#         f"• Услуга: {data['service_name']}\n"
+#         f"• Ссылка: {data['link']}\n"
+#         f"• Количество: {data['quantity']}\n"
+#         f"• Стоимость: {data['cost']} руб.\n\n"
+#         f"После оплаты заказ начнет выполняться автоматически.",
+#         reply_markup=builder.as_markup(),
+#         parse_mode="HTML"
+#     )
+    
+#     await state.set_state(OrderStates.AWAITING_QUANTITY)
+#     await callback.answer()
 
 # Обработчик выбора оплаты через CryptoBot
 @bots.callback_query(F.data == "pay_cryptobot", OrderStates.PAYMENT_METHOD)
@@ -545,16 +646,14 @@ async def pay_with_cryptobot(callback: types.CallbackQuery, state: FSMContext):
     
     await callback.answer()
 
-# Обработчик выбора оплаты через TON
-@bots.callback_query(F.data == "pay_ton", OrderStates.PAYMENT_METHOD)
+@bots.callback_query(F.data == "bots_pay_ton", OrderStates.PAYMENT_METHOD)
 async def pay_with_ton(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     user_id = callback.from_user.id
     
     try:
         # Получаем курс TON к рублю
-        response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=rub")
-        ton_rate = response.json()['the-open-network']['rub']
+        ton_rate = await get_ton_rate()
         
         # Конвертируем рубли в TON
         ton_amount = round(data['cost'] / ton_rate, 4)
@@ -564,42 +663,36 @@ async def pay_with_ton(callback: types.CallbackQuery, state: FSMContext):
         unique_code = generate_unique_code()
         
         builder = InlineKeyboardBuilder()
-        builder.row(
-            InlineKeyboardButton(
-                text="Ton Wallet",
-                url=f"ton://transfer/{TON_WALLET}?amount={amount_nano}&text={unique_code}"
-            ),
-            InlineKeyboardButton(
-                text="Tonkeeper",
-                url=f"https://app.tonkeeper.com/transfer/{TON_WALLET}?amount={amount_nano}&text={unique_code}"
+        
+        # Добавляем кнопки для разных кошельков
+        payment_links = [
+            ("Ton Wallet", f"ton://transfer/{TON_WALLET}"),
+            ("Tonkeeper", f"https://app.tonkeeper.com/transfer/{TON_WALLET}"),
+            ("Tonhub", f"https://tonhub.com/transfer/{TON_WALLET}")
+        ]
+        
+        for name, base_url in payment_links:
+            builder.button(
+                text=name, 
+                url=f"{base_url}?amount={amount_nano}&text={unique_code}"
             )
+            
+        builder.button(
+            text="✅ Проверить оплату", 
+            callback_data=f"check_ton_payment:{unique_code}:{amount_nano}:{data['cost']}"
         )
-        builder.row(
-            InlineKeyboardButton(
-                text="Tonhub",
-                url=f"https://tonhub.com/transfer/{TON_WALLET}?amount={amount_nano}&text={unique_code}"
-            )
+        builder.button(
+            text="❌ Отменить", 
+            callback_data="cancel_payment"
         )
-        builder.row(
-            InlineKeyboardButton(
-                text="✅ Проверить оплату",
-                callback_data=f"check_ton_payment:{unique_code}:{amount_nano}:{data['cost']}"
-            )
-        )
-        builder.row(
-            InlineKeyboardButton(
-                text="❌ Отменить",
-                callback_data="cancel_payment"
-            )
-        )
+        builder.adjust(1)
         
         await callback.message.edit_text(
             f"💎 <b>Оплата через TON</b>\n\n"
-            f"Сумма к оплате: <b>{ton_amount:.4f} TON</b> (~{data['cost']:.2f}₽)\n\n"
-            f"Пожалуйста, отправьте <b>{ton_amount:.4f} TON</b> на адрес:\n"
-            f"<code>{TON_WALLET}</code>\n\n"
-            f"С комментарием:\n<code>{unique_code}</code>\n\n"
-            "После оплаты нажмите кнопку 'Проверить оплату'",
+            f"▪ Сумма: <b>{ton_amount:.4f} TON</b> (~{data['cost']:.2f}₽)\n"
+            f"▪ Адрес: <code>{TON_WALLET}</code>\n"
+            f"▪ Комментарий: <code>{unique_code}</code>\n\n"
+            "После оплаты нажмите 'Проверить оплату'",
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
         )
@@ -619,8 +712,22 @@ async def pay_with_ton(callback: types.CallbackQuery, state: FSMContext):
         await state.clear()
     
     await callback.answer()
+    
+async def get_ton_rate():
+    """Получение курса TON к рублю"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=rub",
+                timeout=5
+            ) as response:
+                data = await response.json()
+                return data['the-open-network']['rub']
+    except Exception as e:
+        logger.error(f"Ошибка при получении курса TON: {e}")
+        return 200  # Курс по умолчанию
 
-# Обработчик проверки оплаты TON
+# Обновленный обработчик проверки оплаты TON
 @bots.callback_query(F.data.startswith("check_ton_payment:"), OrderStates.AWAITING_PAYMENT)
 async def check_ton_payment_handler(callback: types.CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
@@ -635,19 +742,82 @@ async def check_ton_payment_handler(callback: types.CallbackQuery, state: FSMCon
         await callback.answer("❌ Неверные данные платежа", show_alert=True)
         return
     
-    # Проверяем платеж
-    result = await check_ton_payment(amount_nano, unique_code)
+    # Проверяем платеж с подробным логированием
+    logger.info(f"Проверка платежа TON для заказа. Ожидаем: {amount_nano} nanoTON, комментарий: '{unique_code}'")
     
-    if not result:
-        await callback.answer(
-            "Платеж еще не получен. Пожалуйста, подождите и попробуйте снова через 10 секунд.",
-            show_alert=True
-        )
-        return
+    try:
+        expected = int(amount_nano)
+        tolerance = max(int(expected * 0.01), 1000000)  # Допуск 1% или минимум 0.001 TON
+        
+        params = {
+            'address': str(TON_WALLET),
+            'limit': 20,
+            'api_key': str(TON_API_TOKEN),
+            'archival': 'true'
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                response = await session.get(
+                    f"{TON_API_BASE}getTransactions",
+                    params=params,
+                    timeout=20
+                )
+                
+                if response.status != 200:
+                    logger.error(f"TON API error: HTTP {response.status}")
+                    await callback.answer("Ошибка при проверке платежа", show_alert=True)
+                    return
+                
+                data = await response.json()
+                
+                if not data.get('ok', False):
+                    error_msg = data.get('error', 'Неизвестная ошибка API')
+                    logger.error(f"TON API error: {error_msg}")
+                    await callback.answer("Ошибка при проверке платежа", show_alert=True)
+                    return
+                
+                for tx in data.get('result', []):
+                    in_msg = tx.get('in_msg', {})
+                    
+                    # Обработка суммы
+                    tx_value = 0
+                    try:
+                        value = in_msg.get('value')
+                        if value is not None:
+                            tx_value = int(float(value))
+                    except (TypeError, ValueError):
+                        continue
+                    
+                    # Обработка комментария
+                    tx_comment = str(in_msg.get('message', '')).strip()
+                    
+                    # Проверка совпадения
+                    amount_match = abs(tx_value - expected) <= tolerance
+                    comment_match = tx_comment == unique_code.strip()
+                    
+                    if amount_match and comment_match:
+                        logger.info(f"Найден подходящий платеж: {tx_value} nanoTON, комментарий: '{tx_comment}'")
+                        # Если платеж подтвержден, создаем заказ
+                        await create_order_after_payment(callback, state, rub_amount)
+                        return
+                
+                logger.info("Подходящих платежей не найдено")
+                await callback.answer(
+                    "Платеж еще не получен. Пожалуйста, подождите и попробуйте снова через 30 секунд.",
+                    show_alert=True
+                )
+                
+            except asyncio.TimeoutError:
+                logger.error("Timeout при запросе к TON API")
+                await callback.answer("Таймаут при проверке платежа", show_alert=True)
+            except aiohttp.ClientError as e:
+                logger.error(f"Ошибка сети: {str(e)}")
+                await callback.answer("Ошибка сети при проверке платежа", show_alert=True)
     
-    # Если платеж подтвержден, создаем заказ
-    await create_order_after_payment(callback, state, rub_amount)
-    await callback.answer()
+    except Exception as e:
+        logger.error(f"Критическая ошибка при проверке платежа: {type(e).__name__}: {str(e)}")
+        await callback.answer("Произошла ошибка при проверке платежа", show_alert=True)
 
 # Обработчик проверки оплаты через CryptoBot
 @bots.callback_query(F.data == "check_payment", OrderStates.AWAITING_PAYMENT)
@@ -836,7 +1006,7 @@ async def refresh_order_status(callback: types.CallbackQuery):
         f"• Ссылка: {order['link']}\n"
         f"• Количество: {order['quantity']}\n"
         f"• Стоимость: {order['cost']} руб.\n"
-        f"• Способ оплаты: {order.get('payment_method', 'не указан')}\n"
+        # f"• Способ оплаты: {order.get('payment_method', 'не указан')}\n"
         f"• Статус: {status_data['status'].upper()}\n"
         f"Дата: {order['created_at']}"
     )
@@ -867,6 +1037,7 @@ async def render_orders_list(user_id: int, state: FSMContext) -> types.Message |
         )
     builder.adjust(1)
     return builder
+
 @bots.callback_query(F.data == "back_to_orders")
 async def back_to_orders_list(callback: types.CallbackQuery, state: FSMContext):
     builder = await render_orders_list(callback.from_user.id, state)
@@ -880,3 +1051,14 @@ async def back_to_orders_list(callback: types.CallbackQuery, state: FSMContext):
         )
     await state.set_state(OrderStates.VIEW_ORDERS)
     await callback.answer()
+ 
+@bots.message(Command('OrderStatus'))
+async def _(message: types.Message):
+    if message.from_user.id in ADMINS_ID:
+        args = message.text.split()
+        if len(args) > 1:
+            argument = args[1] 
+            status_data = await BotsAPI.get_order_status(argument)
+            await message.answer(f'Status: <blockquote>{status_data}</blockquote>')
+        else:
+            await message.answer("Вы не указали аргумент.")

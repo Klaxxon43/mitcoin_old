@@ -1,69 +1,81 @@
-from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from utils.Imports import Bot
+from fastapi import FastAPI, HTTPException, status
+import logging
+import traceback
+from datebase.db import DB  # Используем ваш существующий класс DB
+import asyncio
 
-# Импортируйте ваш бот и базу данных
-from datebase.db import DB
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 app = FastAPI()
 
-# Модель для запроса
+# Добавляем CORS middleware
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 class UserRequest(BaseModel):
     user_id: int
 
-# Эндпоинт для получения баланса пользователя
+@app.on_event("startup")
+async def startup_event():
+    """Инициализация подключения к БД при старте"""
+    try:
+        await DB.create()  # Используем ваш существующий метод create()
+        logger.info("Database connection initialized")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {str(e)}")
+        raise
+
 @app.post("/get_balance")
 async def get_balance(request: UserRequest):
-    user_id = request.user_id
-    balance = await DB.get_user_balance(user_id)  # Замените на ваш метод для получения баланса
-
-    if balance is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    return {"user_id": user_id, "balance": balance}
+    try:
+        user_id = request.user_id
+        logger.info(f"Requesting balance for user {user_id}")
+        
+        # Получаем баланс из вашего существующего метода
+        balance = await DB.get_user_balance(user_id)
+        
+        if balance is None:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        return {"user_id": user_id, "balance": balance}
+        
+    except Exception as e:
+        logger.error(f"Error in get_balance: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/get_user")
-async def get_balance(request: UserRequest):
-    user_id = request.user_id
-    res = await DB.select_user(user_id)  # Замените на ваш метод для получения баланса
-
-    if res is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    return res
-
-
-
-# --- Модель запроса от сайта ---
-class PaymentData(BaseModel):
-    payment_id: str
-    order_id: str
-    amount: int
-    currency: str
-    method: str
-
-@app.post("/api/payment-success")
-async def handle_payment_success(data: PaymentData, bot: Bot):
-    # Здесь логика обработки и запись в БД
-    text = (
-        f"💳 Платёж прошёл успешно!\n\n"
-        f"🧾 Order ID: {data.order_id}\n"
-        f"💰 Сумма: {data.amount / 100:.2f} {data.currency}\n"
-        f"📎 Метод: {data.method}\n"
-        f"🆔 ID платежа: {data.payment_id}"
-    )
-
-    # Пример отправки администратору
-    admin_id = 5129878568
+async def get_user(request: UserRequest):
     try:
-        await bot.send_message(admin_id, text)
+        user_id = request.user_id
+        logger.info(f"Requesting data for user {user_id}")
+        
+        # Получаем данные пользователя из вашего существующего метода
+        user_data = await DB.select_user(user_id)
+        
+        if user_data is None:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        return user_data
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to send message")
+        logger.error(f"Error in get_user: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-    return {"status": "ok"}
+@app.get("/ping")
+async def ping():
+    return {"status": "alive", "db_connection": "ok"}
 
-
-# Запуск сервера
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
+    # Запускаем в том же event loop, что и aiogram
+    loop = asyncio.get_event_loop()
+    config = uvicorn.Config(app, host="0.0.0.0", port=8000, loop=loop)
+    server = uvicorn.Server(config)
+    loop.run_until_complete(server.serve())

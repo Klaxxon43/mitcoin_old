@@ -1,135 +1,184 @@
 from .client import *
-from config import *
+from confIg import *
+# Настройка логгирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Добавь эту функцию в client.py (можно рядом с другими функциями)
 def generate_unique_code(length=8):
     """Генерация уникального кода для транзакции"""
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
 async def check_ton_payment(expected_amount_nano: str, comment: str) -> bool:
-    """Проверка платежа в сети TON с учетом возможного округления"""
-    print(f"\n🔍 Starting TON payment check for amount: {expected_amount_nano}, comment: '{comment}'")
+    """Проверка платежа в сети TON с подробным логированием"""
+    print(f"\n🔍 [Проверка платежа] Ожидаем: {expected_amount_nano} nanoTON, комментарий: '{comment}'")
     
     try:
-        response = requests.get(
-            f"{TON_API_BASE}getTransactions",
-            params={
-                'address': TON_WALLET,
-                'limit': 100,
-                'api_key': TON_API_TOKEN,
-                'archival': True
-            },
-            timeout=10
-        )
-        
-        data = response.json()
-        if not data.get('ok', False):
-            return False
-
         expected = int(expected_amount_nano)
-        tolerance = 1000000  # Допустимое отклонение ±0.001 TON (1,000,000 нанотонов)
+        tolerance = max(int(expected * 0.01), 1000000)
+        print(f"🔢 Допустимый диапазон: {expected - tolerance} - {expected + tolerance} nanoTON")
         
-        for tx in data.get('result', []):
-            in_msg = tx.get('in_msg', {})
-            tx_value = int(in_msg.get('value', 0))
-            tx_comment = in_msg.get('message', '').strip()
-            
-            print(f"Checking: {tx_value} vs {expected} (±{tolerance}), comment: '{tx_comment}'")
-            
-            if (abs(tx_value - expected) <= tolerance and 
-                tx_comment == comment.strip()):
-                return True
-
-        return False
+        params = {
+            'address': str(TON_WALLET),
+            'limit': 20,
+            'api_key': str(TON_API_TOKEN),
+            'archival': 'true'
+        }
+        
+        print("🌐 Запрашиваем транзакции с параметрами:")
+        print(f" - Адрес: {TON_WALLET}")
+        print(f" - Лимит: 20")
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                response = await session.get(
+                    f"{TON_API_BASE}getTransactions",
+                    params=params,
+                    timeout=20
+                )
+                
+                print(f"📡 Ответ API: статус {response.status}")
+                
+                if response.status != 200:
+                    print(f"❌ Ошибка API: HTTP {response.status}")
+                    return False
+                
+                data = await response.json()
+                print(f"📊 Получено транзакций: {len(data.get('result', []))}")
+                
+                if not data.get('ok', False):
+                    error_msg = data.get('error', 'Неизвестная ошибка API')
+                    print(f"❌ Ошибка API: {error_msg}")
+                    return False
+                
+                for tx in data.get('result', []):
+                    in_msg = tx.get('in_msg', {})
+                    
+                    # Обработка суммы
+                    tx_value = 0
+                    try:
+                        value = in_msg.get('value')
+                        if value is not None:
+                            tx_value = int(float(value))
+                    except (TypeError, ValueError):
+                        continue
+                    
+                    # Обработка комментария
+                    tx_comment = str(in_msg.get('message', '')).strip()
+                    
+                    print(f"\n🔎 Проверяем транзакцию:")
+                    print(f" - Хэш: {tx.get('hash')}")
+                    print(f" - Сумма: {tx_value} nanoTON")
+                    print(f" - Комментарий: '{tx_comment}'")
+                    print(f" - Дата: {tx.get('utime')}")
+                    
+                    # Проверка совпадения
+                    amount_match = abs(tx_value - expected) <= tolerance
+                    comment_match = tx_comment == comment.strip()
+                    
+                    print(f"🔹 Совпадение суммы: {'✅' if amount_match else '❌'}")
+                    print(f"🔹 Совпадение комментария: {'✅' if comment_match else '❌'}")
+                    
+                    if amount_match and comment_match:
+                        print(f"\n🎉 Найден подходящий платеж!")
+                        print(f" - Получено: {tx_value} nanoTON")
+                        print(f" - Ожидалось: {expected} nanoTON (±{tolerance})")
+                        print(f" - Комментарий: '{tx_comment}'")
+                        print(f" - Время: {tx.get('utime')}")
+                        return True
+                
+                print("\n🔍 Подходящих платежей не найдено")
+                return False
+                
+            except asyncio.TimeoutError:
+                print("⏱️ Таймаут при запросе к TON API")
+                return False
+            except aiohttp.ClientError as e:
+                print(f"🌐 Ошибка сети: {str(e)}")
+                return False
+    
     except Exception as e:
-        print(f"TON payment check error: {e}")
+        print(f"💥 Критическая ошибка: {type(e).__name__}: {str(e)}")
         return False
 
-# Добавь этот обработчик в router (можно рядом с другими обработчиками пополнения)
 @router.callback_query(F.data == 'ton_deposit')
 async def ton_deposit_handler(callback: types.CallbackQuery, state: FSMContext):
-    """Обработчик выбора пополнения через TON"""
-    user_id = callback.from_user.id
+    """Обработчик пополнения через TON"""
+    logger.info(f"Начало обработки TON депозита для user_id: {callback.from_user.id}")
     
-    # Получаем курс TON к рублю (можно использовать любой API)
     try:
-        response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=rub")
-        ton_rate = response.json()['the-open-network']['rub']
-    except:
-        ton_rate = 200  # Значение по умолчанию если API не доступен
-    
-    await callback.message.edit_text(
-        f"💎 <b>Пополнение через TON</b>\n\n"
-        f"Текущий курс: 1 TON = {ton_rate:.2f}₽\n\n"
-        "Введите сумму в рублях, которую вы хотите пополнить:",
-        reply_markup=back_menu_kb(user_id)
-    )
-    
-    await state.set_state("waiting_ton_amount")
-    await state.update_data(ton_rate=ton_rate)
+        # Получаем курс TON к рублю
+        ton_rate = await get_ton_rate()
+        logger.info(f"Текущий курс TON: {ton_rate} RUB")
+        
+        await callback.message.edit_text(
+            f"💎 <b>Пополнение через TON</b>\n\n"
+            f"Текущий курс: 1 TON = {ton_rate:.2f}₽\n\n"
+            "Введите сумму в рублях (от 10₽):",
+            reply_markup=back_menu_kb(callback.from_user.id)
+        )
+        
+        await state.set_state("waiting_ton_amount")
+        await state.update_data(ton_rate=ton_rate)
+        logger.info("Состояние установлено: waiting_ton_amount")
+        
+    except Exception as e:
+        logger.error(f"Ошибка в ton_deposit_handler: {e}")
+        await callback.answer("Произошла ошибка, попробуйте позже", show_alert=True)
 
+async def get_ton_rate():
+    """Получение курса TON к рублю"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=rub",
+                timeout=5
+            ) as response:
+                data = await response.json()
+                return data['the-open-network']['rub']
+    except Exception as e:
+        logger.error(f"Ошибка при получении курса TON: {e}")
+        return 200  # Курс по умолчанию
 
 @router.message(F.text, StateFilter("waiting_ton_amount"))
 async def process_ton_amount(message: types.Message, state: FSMContext):
-    """Обработка ввода суммы для пополнения через TON"""
-    user_id = message.from_user.id
+    """Обработка суммы пополнения"""
+    logger.info(f"Обработка суммы от user_id: {message.from_user.id}")
+    
     try:
         rub_amount = float(message.text.strip())
-        if rub_amount < 10:
-            await message.answer("Минимальная сумма пополнения - 10 рублей")
-            return
-        
+        # if rub_amount < 10:
+        #     await message.answer("Минимальная сумма - 10 рублей")
+        #     return
+            
         data = await state.get_data()
         ton_rate = data['ton_rate']
         
-        # Конвертируем рубли в TON
-        ton_amount = (rub_amount / ton_rate, 4)
-        amount_nano = int(ton_amount * 1_000_000_000)  # Конвертация в нанотоны
-        
-        # Генерируем уникальный комментарий
+        ton_amount = round(rub_amount / ton_rate, 4)
+        amount_nano = int(ton_amount * 10**9)
         unique_code = generate_unique_code()
         
         builder = InlineKeyboardBuilder()
-        builder.row(
-            InlineKeyboardButton(
-                text="Ton Wallet",
-                url=f"ton://transfer/{TON_WALLET}?amount={amount_nano}&text={unique_code}"
-            ),
-            InlineKeyboardButton(
-                text="Tonkeeper",
-                url=f"https://app.tonkeeper.com/transfer/{TON_WALLET}?amount={amount_nano}&text={unique_code}"
-            )
-        )
-        builder.row(
-            InlineKeyboardButton(
-                text="Tonhub",
-                url=f"https://tonhub.com/transfer/{TON_WALLET}?amount={amount_nano}&text={unique_code}"
-            )
-        )
-        builder.row(
-            InlineKeyboardButton(
-                text="✅ Проверить оплату",
-                callback_data=f"check_ton_payment:{unique_code}:{amount_nano}:{rub_amount}"
-            )
-        )
-        builder.row(
-            InlineKeyboardButton(
-                text="✏️ Изменить сумму",
-                callback_data="ton_deposit"
-            ),
-            InlineKeyboardButton(
-                text="🔙 Назад",
-                callback_data="select_deposit_menu"
-            )
-        )
-
+        payment_links = [
+            ("Ton Wallet", f"ton://transfer/{TON_WALLET}"),
+            ("Tonkeeper", f"https://app.tonkeeper.com/transfer/{TON_WALLET}"),
+            ("Tonhub", f"https://tonhub.com/transfer/{TON_WALLET}")
+        ]
+        
+        for name, base_url in payment_links:
+            builder.button(text=name, url=f"{base_url}?amount={amount_nano}&text={unique_code}")
+            
+        builder.button(text="✅ Проверить оплату", callback_data=f"check_ton:{unique_code}:{amount_nano}:{rub_amount}")
+        builder.button(text="✏️ Изменить сумму", callback_data="ton_deposit")
+        builder.button(text="🔙 Назад", callback_data="select_deposit_menu")
+        
+        builder.adjust(2, 1, 1)
+        
         await message.answer(
             f"💎 <b>Пополнение через TON</b>\n\n"
-            f"Сумма к оплате: <b>{ton_amount:.4f} TON</b> (~{rub_amount:.2f}₽)\n\n"
-            f"Пожалуйста, отправьте <b>{ton_amount:.4f} TON</b> на адрес:\n"
-            f"<code>{TON_WALLET}</code>\n\n"
-            f"С комментарием:\n<code>{unique_code}</code>\n\n"
-            "После оплаты нажмите кнопку 'Проверить оплату'",
+            f"▪ Сумма: <b>{ton_amount:.4f} TON</b> (~{rub_amount:.2f}₽)\n"
+            f"▪ Адрес: <code>{TON_WALLET}</code>\n"
+            f"▪ Комментарий: <code>{unique_code}</code>\n\n"
+            "После оплаты нажмите 'Проверить оплату'",
             reply_markup=builder.as_markup()
         )
         
@@ -138,46 +187,45 @@ async def process_ton_amount(message: types.Message, state: FSMContext):
             unique_code=unique_code,
             rub_amount=rub_amount
         )
+        logger.info(f"Сгенерирован запрос на оплату: {amount_nano} nanoTON, код: {unique_code}")
+        
     except ValueError:
-        await message.answer("Пожалуйста, введите корректную сумму в рублях (например: 100)")
+        await message.answer("Введите число (например: 100)")
+        logger.warning("Некорректный ввод суммы")
 
-@router.callback_query(F.data.startswith("check_ton_payment:"))
-async def check_ton_payment_callback(callback: types.CallbackQuery, state: FSMContext):
-    """Проверка платежа TON"""
-    parts = callback.data.split(":")
-    unique_code = parts[1]
-    amount_nano = parts[2]
-    rub_amount = float(parts[3])
+@router.callback_query(F.data.startswith("check_ton:"))
+async def check_payment_handler(callback: types.CallbackQuery, state: FSMContext):
+    """Проверка оплаты"""
+    logger.info(f"Проверка платежа для user_id: {callback.from_user.id}")
     
-    result = await check_ton_payment(amount_nano, unique_code)
-    
-    if not result:
-        await callback.answer(
-            "Платеж еще не получен. Пожалуйста, подождите и попробуйте снова через 10 секунд.",
-            show_alert=True
-        )
-        return
-    
-    user_id = callback.from_user.id
-    
-    # Зачисляем рубли на баланс
-    await DB.add_rub_balance(user_id, rub_amount)
-    await DB.add_transaction(
-        user_id=user_id,
-        amount=rub_amount,
-        description="пополнение TON",
-        additional_info=None
-    )
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(text="🔙 Назад", callback_data="profile")
-    )
-    
-    await callback.message.edit_text(
-        f"✅ <b>Платеж подтвержден!</b>\n\n"
-        f"Ваш баланс пополнен на {rub_amount:.2f}₽\n\n"
-        "Спасибо за использование нашего сервиса!",
-        reply_markup=builder.as_markup()
-    )
-    await state.clear()
+    try:
+        _, code, amount_nano, rub_amount = callback.data.split(':')
+        
+        if await check_ton_payment(amount_nano, code):
+            user_id = callback.from_user.id
+            rub_amount = float(rub_amount)
+            
+            await DB.add_balance(user_id, rub_amount* 1000)
+            await DB.add_transaction(
+                user_id=user_id,
+                amount=rub_amount,
+                description="Пополнение TON",
+                additional_info=code
+            )
+            
+            await callback.message.edit_text(
+                f"✅ <b>Платеж получен!</b>\n"
+                f"Ваш баланс пополнен на {rub_amount:.2f}₽",
+                reply_markup=InlineKeyboardBuilder()
+                    .button(text="👌 OK", callback_data="profile")
+                    .as_markup()
+            )
+            await state.clear()
+            logger.info(f"Платеж подтвержден для user_id: {user_id}")
+        else:
+            await callback.answer("Платеж не найден. Попробуйте через 30 секунд", show_alert=True)
+            logger.warning(f"Платеж не найден для user_id: {callback.from_user.id}")
+            
+    except Exception as e:
+        logger.error(f"Ошибка при проверке платежа: {e}")
+        await callback.answer("Произошла ошибка, попробуйте позже", show_alert=True)

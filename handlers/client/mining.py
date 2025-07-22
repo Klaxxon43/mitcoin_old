@@ -17,7 +17,7 @@ async def mining_menu(callback: types.CallbackQuery, bot: Bot):
     if not await check_subs_op(user_id, bot):
         return
     
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     

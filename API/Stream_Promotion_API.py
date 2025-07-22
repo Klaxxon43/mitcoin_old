@@ -146,5 +146,6 @@ async def main():
     #     order_status = await api.get_order_status(order_id)
     #     print("Статус заказа:", order_status)
 
-# Запуск асинхронного кода
-asyncio.run(main())
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())

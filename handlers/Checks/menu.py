@@ -1,10 +1,6 @@
-from utils.Imports import *
 from handlers.client.client import *
-from handlers.client.states import *
 
-check_router = Router()
-
-@check_router.callback_query(F.data == 'checks_menu')
+@router.callback_query(F.data == 'checks_menu')
 async def checks_menu(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
 
@@ -16,7 +12,7 @@ async def checks_menu(callback: types.CallbackQuery, bot: Bot):
     if not await check_subs_op(user_id, bot):
         return
     
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     
@@ -97,7 +93,7 @@ def checkspaginate_tasks(checks, checkspage=1, per_page=5):
     tasks_on_page = checks[start_idx:end_idx]
     return tasks_on_page, total_pages
 
-@check_router.callback_query(F.data == 'my_checks')
+@router.callback_query(F.data == 'my_checks')
 async def my_checks(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     checks = await DB.get_check_by_user_id(user_id)
@@ -111,7 +107,7 @@ async def my_checks(callback: types.CallbackQuery):
 
     await callback.message.edit_text("💸 <b>Ваши чеки:</b>", reply_markup=keyboard)
 
-@check_router.callback_query(lambda c: c.data.startswith("checkspage_"))
+@router.callback_query(lambda c: c.data.startswith("checkspage_"))
 async def change_page_handler(callback: types.CallbackQuery):
     checkspage = int(callback.data.split('_')[1])
     user_id = callback.from_user.id
@@ -125,7 +121,7 @@ async def change_page_handler(callback: types.CallbackQuery):
 
     await callback.message.edit_text("💸 Ваши чеки:", reply_markup=keyboard)
 
-@check_router.callback_query(lambda c: c.data.startswith("check_"))
+@router.callback_query(lambda c: c.data.startswith("check_"))
 async def check_detail_handler(callback: types.CallbackQuery, bot: Bot):
     await callback.answer()
     check_id = int(callback.data.split('_')[1]) 
@@ -272,7 +268,7 @@ async def check_detail_handler(callback: types.CallbackQuery, bot: Bot):
     # Редактируем сообщение с новой информацией и клавиатурой
     await callback.message.edit_text(check_info, reply_markup=keyboard)
 
-@check_router.callback_query(lambda c: c.data.startswith("sendmitdrops_"))
+@router.callback_query(lambda c: c.data.startswith("sendmitdrops_"))
 async def sendmitdrops(callback: types.CallbackQuery, state: FSMContext):
     check_id = int(callback.data.split('_')[1])
     user_id = callback.from_user.id
@@ -287,7 +283,7 @@ async def sendmitdrops(callback: types.CallbackQuery, state: FSMContext):
 2) Общая сумма чека больше 50000 $MICO 
     ''', reply_markup=keyboard)
 
-@check_router.callback_query(lambda c: c.data.startswith("mitcoindrop_"))
+@router.callback_query(lambda c: c.data.startswith("mitcoindrop_"))
 async def sendmitdrops1(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     check_id = int(callback.data.split('_')[1])
     user_id = callback.from_user.id
@@ -327,7 +323,7 @@ async def sendmitdrops1(callback: types.CallbackQuery, state: FSMContext, bot: B
             '❌ Ваш чек не подходит по условиям',
             reply_markup=back_menu_kb(user_id))
 
-@check_router.callback_query(lambda c: c.data.startswith("addopcheck_"))
+@router.callback_query(lambda c: c.data.startswith("addopcheck_"))
 async def delete_check_handler(callback: types.CallbackQuery, state: FSMContext):
     check_id = int(callback.data.split('_')[1])
     user_id = callback.from_user.id
@@ -338,7 +334,7 @@ async def delete_check_handler(callback: types.CallbackQuery, state: FSMContext)
     await state.set_state(checks.check_op)
     await state.update_data(check_id=check_id)
 
-@check_router.message(checks.check_op)
+@router.message(checks.check_op)
 async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     data = await state.get_data()
@@ -388,7 +384,7 @@ async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FS
         await message.answer('☹ Не удалось найти канал, либо произошла ошибка. Повторите попытку.')
         return
 
-@check_router.callback_query(lambda c: c.data.startswith("addbalancecheck_"))
+@router.callback_query(lambda c: c.data.startswith("addbalancecheck_"))
 async def activation_check_handler(callback: types.CallbackQuery, state: FSMContext):
     check_id = int(callback.data.split('_')[1])
     user_id = callback.from_user.id
@@ -403,7 +399,7 @@ async def activation_check_handler(callback: types.CallbackQuery, state: FSMCont
     await state.set_state(checks.add_activation)
     await state.update_data(check_id=check_id)
 
-@check_router.message(checks.add_activation)
+@router.message(checks.add_activation)
 async def handle_custom_check_activation(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     data = await state.get_data()
@@ -438,7 +434,7 @@ async def handle_custom_check_activation(message: types.Message, bot: Bot, state
     except ValueError:
         await message.answer('❗ Введите желаемое количество активаций в виде целого числа')
 
-@check_router.callback_query(lambda c: c.data.startswith("addpasswordcheck_"))
+@router.callback_query(lambda c: c.data.startswith("addpasswordcheck_"))
 async def delete_check_handler(callback: types.CallbackQuery, state: FSMContext):
     check_id = int(callback.data.split('_')[1])
     user_id = callback.from_user.id
@@ -449,7 +445,7 @@ async def delete_check_handler(callback: types.CallbackQuery, state: FSMContext)
     await state.set_state(checks.check_password)
     await state.update_data(check_id=check_id)
 
-@check_router.message(checks.check_password)
+@router.message(checks.check_password)
 async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     data = await state.get_data()
@@ -470,7 +466,7 @@ async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FS
     except ValueError:
         await message.answer('❗ Напишите пароль в текстовом формате...')
 
-@check_router.callback_query(lambda c: c.data.startswith("adddiscription_"))
+@router.callback_query(lambda c: c.data.startswith("adddiscription_"))
 async def delete_check_handler(callback: types.CallbackQuery, state: FSMContext):
     check_id = int(callback.data.split('_')[1])
     user_id = callback.from_user.id
@@ -479,7 +475,7 @@ async def delete_check_handler(callback: types.CallbackQuery, state: FSMContext)
     await state.set_state(checks.check_discription)
     await state.update_data(check_id=check_id)
 
-@check_router.message(checks.check_discription)
+@router.message(checks.check_discription)
 async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     data = await state.get_data()
@@ -500,7 +496,7 @@ async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FS
     except ValueError:
         await message.answer('❗ Напишите текстовое описание к чеку...')
 
-@check_router.callback_query(lambda c: c.data.startswith("pincheckuser_"))
+@router.callback_query(lambda c: c.data.startswith("pincheckuser_"))
 async def delete_check_handler(callback: types.CallbackQuery, state: FSMContext):
     check_id = int(callback.data.split('_')[1])
     user_id = callback.from_user.id
@@ -509,7 +505,7 @@ async def delete_check_handler(callback: types.CallbackQuery, state: FSMContext)
     await state.set_state(checks.check_lock_user)
     await state.update_data(check_id=check_id)
 
-@check_router.message(checks.check_lock_user)
+@router.message(checks.check_lock_user)
 async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     data = await state.get_data()
@@ -528,7 +524,7 @@ async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FS
     except ValueError:
         await message.answer('❗ Попробуйте заново...')
 
-@check_router.callback_query(lambda c: c.data.startswith("checkdelete_"))
+@router.callback_query(lambda c: c.data.startswith("checkdelete_"))
 async def delete_check_handler(callback: types.CallbackQuery):
     check_id = int(callback.data.split('_')[1])
     user_id = callback.from_user.id

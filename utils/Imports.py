@@ -1,5 +1,5 @@
 # Стандартные библиотеки
-import os, asyncio, logging, random, uuid, sys, traceback, time, emoji, re, pytz, requests, json, copy, string
+import os, asyncio, logging, random, uuid, sys, traceback, time, emoji, re, pytz, requests, json, copy, string, aiohttp, hashlib
 from datetime import datetime
 from pathlib import Path
 from aiocryptopay import AioCryptoPay, Networks
@@ -32,7 +32,7 @@ from aiogram.types import (
 # Локальные модули
 from datebase.db import DB, Promo, Contest, Boost
 from utils.kb import *
-from config import CRYPTOBOT_TOKEN, ADMINS_ID, BotsAPI, TON_WALLET, TON_API_TOKEN, TON_API_BASE
+from confIg import CRYPTOBOT_TOKEN, ADMINS_ID, BotsAPI, TON_WALLET, TON_API_TOKEN, TON_API_BASE, API_TOKEN
 from threading import Lock
 from datetime import timedelta
 from PIL import Image, ImageDraw, ImageFont
@@ -46,6 +46,6 @@ INFO_ID = -4784146602
 TASKS_CHAT_ID = -1002291978719
 REPORT_CHAT_ID = -1002291978719
 WITHDRAW_CHAT = -1002684215736#-4705317806
-
+OFFICIAL_CHANNEL_ID = -1002411973361
 
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")

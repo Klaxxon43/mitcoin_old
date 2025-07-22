@@ -62,13 +62,21 @@ class DataBase:
                     status INTEGER DEFAULT 1 
                 )
             ''')
+
             await cur.execute('''
                 CREATE TABLE IF NOT EXISTS deposit (
                     deposit_id INTEGER PRIMARY KEY,
+                    unique_id TEXT,
                     user_id INTEGER,
-                    amount INTEGER
+                    amount INTEGER,
+                    date TEXT DEFAULT CURRENT_TIMESTAMP,
+                    status TEXT DEFAULT NULL,
+                    service TEXT DEFAULT NULL,
+                    item TEXT DEFAULT NULL
                 )
-            ''')
+            ''') 
+
+
             
             await cur.execute('''
                 CREATE TABLE IF NOT EXISTS completed_tasks (
@@ -500,7 +508,8 @@ class DataBase:
                     user_id INTEGER,
                     chat_id INTEGER,
                     date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    reward_given BOOLEAN DEFAULT FALSE  -- Новая колонка для отметки о выдаче награды
+                    reward_given BOOLEAN DEFAULT FALSE,
+                    UNIQUE(user_id, chat_id)  -- Добавляем уникальное ограничение
                 )
             ''')
 

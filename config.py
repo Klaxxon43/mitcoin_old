@@ -6,11 +6,43 @@ HOST='0.0.0.0'
 PORT=8000
 BASE_URL='efnejrnerj' #можно через ngrok
 WEBHOOK_PATH = f'/{API_TOKEN}'
+
 TON_API_BASE = "https://toncenter.com/api/v2/"
 TON_API_TOKEN = "f8e79e787c66fbb7a10ef3e2456151e9e3c3f5b74e6231b85ba08be5a9d5359b"  # Замени на реальный API ключ от TON Center
-TON_WALLET = "UQBKc7lifQe_U4cUibpyY5J5AQF7hRIPXIJZvuohf0x4E1n1"  # Адрес кошелька для приема платежей
-from API.StreamPromotionAPI import StreamPromotionAPI
+TON_WALLET = "UQAKAfkG7XDmKfAwVyziPryAPaArEOS1TWRs4YDagUlwylHg"  # Адрес кошелька для приема платежей
+
+from API.Stream_Promotion_API import StreamPromotionAPI
 BotsAPI = StreamPromotionAPI("Cxqup7n2Ca3dh1bbhBM4WoK89k7XMJ83")
+
+APAY_CLIENT_ID = 1080
+APAY_SECRET_KEY = "aa75c8bc-19c2-4901-9290-0f1feead864e"
+
+# import os
+# # Задаем переменные окружения
+# API_TOKEN = '7866394890:AAFSpTKFzbRO9-ZmLFRyI418wUlcCSSijWM'
+# CRYPTOBOT_TOKEN = '275327:AAp2d4Vpr0zMpDYOiyT1MP70KfUpNhSTVys'
+# HOST='0.0.0.0'
+# PORT=8000
+# BASE_URL='efnejrnerj' #можно через ngrok
+# WEBHOOK_PATH = f'/{API_TOKEN}'
+# TON_API_BASE = "https://toncenter.com/api/v2/"
+# TON_API_TOKEN = "f8e79e787c66fbb7a10ef3e2456151e9e3c3f5b74e6231b85ba08be5a9d5359b"  # Замени на реальный API ключ от TO>TON_WALLET = "UQAKAfkG7XDmKfAwVyziPryAPaArEOS1TWRs4YDagUlwylHg"  # Адрес кошелька для приема платежей
+# from API.Stream_Promotion_API import StreamPromotionAPI
+# BotsAPI = StreamPromotionAPI("Cxqup7n2Ca3dh1bbhBM4WoK89k7XMJ83")
+
+
+# import os
+# # Задаем переменные окружения
+# API_TOKEN = '7866394890:AAFSpTKFzbRO9-ZmLFRyI418wUlcCSSijWM'
+# CRYPTOBOT_TOKEN = '275327:AAp2d4Vpr0zMpDYOiyT1MP70KfUpNhSTVys'
+# HOST='0.0.0.0'
+# PORT=8000
+# BASE_URL='efnejrnerj' #можно через ngrok
+# WEBHOOK_PATH = f'/{API_TOKEN}'
+# TON_API_BASE = "https://toncenter.com/api/v2/"
+# TON_API_TOKEN = "f8e79e787c66fbb7a10ef3e2456151e9e3c3f5b74e6231b85ba08be5a9d5359b"  # Замени на реальный API ключ от TO>TON_WALLET = "UQAKAfkG7XDmKfAwVyziPryAPaArEOS1TWRs4YDagUlwylHg"  # Адрес кошелька для приема платежей
+# from API.Stream_Promotion_API import StreamPromotionAPI
+# BotsAPI = StreamPromotionAPI("Cxqup7n2Ca3dh1bbhBM4WoK89k7XMJ83")
 
 #telethon
 #1
@@ -60,21 +92,3 @@ BotsAPI = StreamPromotionAPI("Cxqup7n2Ca3dh1bbhBM4WoK89k7XMJ83")
 # ]
 
 ADMINS_ID = [996459546, 2118524898, 5492008614, 5129878568]
-
-
-# import os
-# # Задаем переменные окружения
-# API_TOKEN = '7866394890:AAFSpTKFzbRO9-ZmLFRyI418wUlcCSSijWM'
-# CRYPTOBOT_TOKEN = '275327:AAp2d4Vpr0zMpDYOiyT1MP70KfUpNhSTVys'
-# HOST='0.0.0.0'
-# PORT=8000
-# BASE_URL='efnejrnerj' #можно через ngrok
-# WEBHOOK_PATH = f'/{API_TOKEN}'
-
-# #telethon
-# api_id = '25159668'
-# api_hash = '3c0bf4ca735fec3f3cb59302239a0cca'
-# phone_number = '+79097217693'
-
-
-# ADMINS_ID = [996459546, 2118524898, 6806012624, 5129878568]

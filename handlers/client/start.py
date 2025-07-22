@@ -7,7 +7,7 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
     user_id = message.from_user.id
     username = message.from_user.username
     
-    if not await DB.get_break_status():
+    if await DB.get_break_status() and user_id not in ADMINS_ID:
         await message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
     
@@ -85,6 +85,7 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
     """Обрабатывает участие в конкурсе из команды /start"""
     print(f"\n=== START HANDLE PARTICIPATION ===")
     print(f"contest_id: {contest_id}, user_id: {user_id}, username: {username}")
+    import json
     
     try:
         # 1. Получаем данные о конкурсе
@@ -97,26 +98,58 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
             await message.answer("Конкурс не найден", reply_markup=back_menu_kb(user_id))
             return
 
-        # 2. Извлекаем данные из кортежа
         print("\n[2] Извлекаем значения конкурса...")
         channel_url = contest[1]  # https://t.me/concest1
         message_id = contest[-2]  # ID сообщения
-        contest_text = contest[-1]  # Текст сообщения
+        contest_text = contest[-1]  # Текст сообщения (может быть None)
         channel_username = channel_url.replace("https://t.me/", "").replace("@", "")
         print(f"Канал: @{channel_username}, ID сообщения: {message_id}")
+
+        # Создаём contest_data заранее, чтобы использовать в любом случае
+        contest_data = {
+            'channel_url': channel_url,
+            'winners_count': contest[2],
+            'prizes': json.loads(contest[3]),
+            'start_date': contest[4],
+            'end_date': contest[5],
+            'conditions': contest[6],
+            'contest_text': contest[7],
+            'image_path': contest[8]
+        }
+
+        # Если текст конкурса не получен, попробуем сгенерировать его заново
+        if not contest_text:
+            print("\n[2.1] Генерируем текст конкурса...")
+            try:
+                conditions = json.loads(contest[6]) if contest[6] else {}
+                from handlers.Admin.contest import generate_contest_text
+                contest_text = await generate_contest_text(contest_data, conditions)
+                print(f"Сгенерированный текст: {contest_text}")
+            except Exception as e:
+                print(f"Ошибка генерации текста конкурса: {e}")
+                contest_text = "🎉 Конкурс 🎉\n\nУчастников: 0"
 
         # 3. Проверяем условия участия
         print("\n[3] Проверяем условия участия...")
         conditions = {}
         try:
-            conditions = json.loads(contest[6]) if contest[6] else {}
+            conditions = json.loads(contest[7]) if contest[7] else {}
         except json.JSONDecodeError as e:
             print(f"Ошибка парсинга условий: {e}")
-        
-        auto_conditions = conditions.get("auto_conditions", [])
-        additional_channels = conditions.get("additional_channels", [])
+
+        conditions_str = contest[6]  # Это строка JSON: '{"auto_conditions": ["is_bot_user", ...], ...}'
+
+        # Парсим JSON в словарь
+        import json
+        conditions = json.loads(conditions_str) if conditions_str else {}
+
+        # Извлекаем переменные
+        auto_conditions = conditions.get('auto_conditions', [])
+        additional_channels = conditions.get('additional_channels', [])  # Исправлено с 'additional'
+        required_refs = conditions.get('required_refs', 0)
         print(f"Условия: {auto_conditions}")
         print(f"Доп. каналы: {additional_channels}")
+        print(f"Требуемое количество рефералов: {required_refs}")
 
         # Проверка подписки на основной канал
         if "sub_channel" in auto_conditions:
@@ -167,14 +200,21 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
                         reply_markup=back_menu_kb(user_id))
                     return
 
-        # if 'is_bot_user' in auto_conditions:
-        #     # Проверка, что пользователь есть в базе бота
-        #     if not await DB.select_user(user_id):
-        #         await message.answer(
-        #             "Вы не зарегистрированы в боте. Пожалуйста, начните с команды /start",
-        #             reply_markup=back_menu_kb(user_id))
-        #         return
-                
+        # Проверка количества приглашенных рефералов
+        if required_refs > 0:
+            print("\n[3.3] Проверка количества рефералов...")
+            referred_users = await DB.get_referred_users(user_id)
+            current_refs = len(referred_users)
+            print(f"Текущее количество рефералов: {current_refs}")
+            
+            if current_refs < required_refs:
+                print(f"Недостаточно рефералов (нужно {required_refs}, есть {current_refs})")
+                await message.answer(
+                    f"Для участия в конкурсе вам нужно пригласить {required_refs} друзей.\n"
+                    f"Вы пригласили: {current_refs}",
+                    reply_markup=back_menu_kb(user_id))
+                return
+
         if 'is_active_user' in auto_conditions:
             count = (await DB.get_task_counts(user_id))[0]
             if count < 15:
@@ -183,7 +223,6 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
                     '<b>Активным пользователем считается тот, кто за последние сутки выполнил более 15 заданий</b>',
                     reply_markup=back_menu_kb(user_id))
                 return 
-            
 
         # 4. Добавляем участника
         print("\n[4] Добавляем участника...")
@@ -202,13 +241,10 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
         
         # 6. Обновляем текст конкурса
         print("\n[6] Обновляем текст конкурса...")
+        # Если текст конкурса пуст, используем минимальный вариант
         if not contest_text:
-            print("Текст конкурса пуст!")
-            await message.answer(
-                "Не удалось обновить конкурс: текст не найден",
-                reply_markup=back_menu_kb(user_id))
-            return
-
+            contest_text = "🎉 Конкурс 🎉\n\nУчастников: 0"
+        
         # Обновляем строку с количеством участников
         updated_text = update_participants_count(contest_text, participants_count)
         print(f"Обновленный текст:\n{updated_text}")
@@ -219,7 +255,7 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
             if not updated_text.strip():
                 raise ValueError("Текст сообщения пуст после обновления")
             
-            # Создаем кнопку "Участвовать" (выносим это до попыток редактирования)
+            # Создаем кнопку "Участвовать"
             bot_username = (await bot.get_me()).username
             participate_kb = InlineKeyboardBuilder()
             participate_kb.button(
@@ -233,7 +269,8 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
                     chat_id=f"@{channel_username}",
                     message_id=message_id,
                     text=updated_text,
-                    reply_markup=participate_kb.as_markup()  # Добавляем кнопку
+                    reply_markup=participate_kb.as_markup(),
+                    parse_mode="HTML"
                 )
             except Exception as text_edit_error:
                 print(f"Не удалось отредактировать текст: {text_edit_error}")
@@ -243,25 +280,28 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
                         chat_id=f"@{channel_username}",
                         message_id=message_id,
                         caption=updated_text,
-                        reply_markup=participate_kb.as_markup()  # Добавляем кнопку
+                        reply_markup=participate_kb.as_markup(),
+                        parse_mode="HTML"
                     )
                 except Exception as caption_edit_error:
                     print(f"Не удалось отредактировать подпись: {caption_edit_error}")
                     try:
                         # Если не получилось редактировать, отправляем новое сообщение
-                        if contest.get("image_path") and os.path.exists(contest["image_path"]):
-                            with open(contest["image_path"], 'rb') as photo:
-                                new_message = await bot.send_photo(
+                        if contest_data['image_path'] and os.path.exists(contest_data["image_path"]):
+                            with open(contest_data['image_path'], 'rb') as photo:
+                                new_message = await bot.send_photo( 
                                     chat_id=f"@{channel_username}",
                                     photo=types.BufferedInputFile(photo.read(), filename="contest.jpg"),
                                     caption=updated_text,
-                                    reply_markup=participate_kb.as_markup()
+                                    reply_markup=participate_kb.as_markup(),
+                                    parse_mode="HTML"
                                 )
                         else:
                             new_message = await bot.send_message(
                                 chat_id=f"@{channel_username}",
                                 text=updated_text,
-                                reply_markup=participate_kb.as_markup()
+                                reply_markup=participate_kb.as_markup(),
+                                parse_mode="HTML"
                             )
                         
                         # Обновляем ID сообщения в базе данных
@@ -277,8 +317,7 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
             print(f"Ошибка валидации: {e}")
             await message.answer(
                 "Ошибка: недопустимый текст сообщения",
-                reply_markup=back_menu_kb(user_id)
-            )
+                reply_markup=back_menu_kb(user_id))
         except Exception as e:
             print(f"Неизвестная ошибка при редактировании: {e}")
             await message.answer(

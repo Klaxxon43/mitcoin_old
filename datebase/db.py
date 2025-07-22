@@ -10,7 +10,7 @@ import matplotlib.dates as mdates
 from io import BytesIO
 from aiogram.types import BufferedInputFile
 from datetime import datetime
-
+from utils.Imports import *
 import io
 from datetime import datetime, timedelta
 
@@ -350,7 +350,7 @@ class DataBase:
 
     async def all_balance(self):
         try:
-            from config import ADMINS_ID
+            from confIg import ADMINS_ID
             print(f"ADMINS_ID: {ADMINS_ID}")
             async with self.con.cursor() as cur:
                 query = """
@@ -959,14 +959,34 @@ class DataBase:
             result = await cur.fetchone()
             return result[0] if result[0] is not None else 0
 
-    async def add_deposit(self, user_id, amount):
+    async def add_deposit(self, user_id, amount, unique_id=None, status=None, service=None, item=None):
         async with self.con.cursor() as cur:
-            await cur.execute(
-                'INSERT INTO deposit (user_id, amount) VALUES (?, ?)',
-                (user_id, amount)
-            )
+            await cur.execute('''
+                INSERT INTO deposit (unique_id, user_id, amount, status, service, item)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (unique_id, user_id, amount, status, service, item))
             await self.con.commit()
 
+
+    async def update_deposit(self, deposit_id: int, **fields):
+        if not fields:
+            return
+        async with self.con.cursor() as cur:
+            set_clause = ", ".join(f"{k}=?" for k in fields)
+            values = list(fields.values()) + [deposit_id]
+            query = f"UPDATE deposit SET {set_clause} WHERE deposit_id=?"
+            await cur.execute(query, values)
+            await self.con.commit()
+
+    async def get_deposit(self, unique_id: str) -> Optional[Dict]:
+        async with self.con.cursor() as cur:
+            await cur.execute("SELECT * FROM deposit WHERE unique_id=?", (unique_id,))
+            row = await cur.fetchone()
+            if row:
+                columns = [desc[0] for desc in cur.description]
+                return dict(zip(columns, row))
+            return None
+        
     async def get_total_deposits(self):
         """Метод для подсчета общей суммы всех депозитов"""
         async with self.con.cursor() as cur:
@@ -1069,10 +1089,13 @@ class DataBase:
     # БАЛАНС
 
     async def get_user_balance(self, user_id):
-        async with self.con.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,)) as cursor:
+        async with self.con.execute(
+            'SELECT balance FROM users WHERE user_id = ?', (user_id,)
+        ) as cursor:
             row = await cursor.fetchone()
-            return row['balance'] if row else 0  # Возвращаем баланс или 0, если записи нет
-            
+            print(row)
+            return row[0] if row else 0
+                
 
     async def add_balance(self, user_id, amount):
         async with self.con.cursor() as cur:
@@ -1555,6 +1578,7 @@ class DataBase:
                 WHERE task_id = ? AND user_id = ?
             ''', (task_id, user_id))
             await self.con.commit()
+
     async def is_task_pending(self, user_id: int, task_id: int) -> bool:
         async with self.con.cursor() as cur:
             await cur.execute('''
@@ -1581,6 +1605,31 @@ class DataBase:
             ''', (user_id, task_id))
             return await cur.fetchone() is not None
         
+    async def get_user_task_statuses(self, user_id: int) -> set[int]:
+        """Возвращает множество task_id, уже завершённых, проваленных или ожидающих"""
+        task_ids = set()
+
+        async with self.con.cursor() as cur:
+            # Все выполненные задания
+            await cur.execute('''
+                SELECT task_id FROM completed_tasks WHERE user_id = ?
+            ''', (user_id,))
+            task_ids.update(row[0] for row in await cur.fetchall())
+
+            # Все проваленные задания
+            await cur.execute('''
+                SELECT task_id FROM failed_tasks WHERE user_id = ?
+            ''', (user_id,))
+            task_ids.update(row[0] for row in await cur.fetchall())
+
+            # Все задания, в ожидании реакции
+            await cur.execute('''
+                SELECT task_id FROM pending_reaction_tasks WHERE user_id = ?
+            ''', (user_id,))
+            task_ids.update(row[0] for row in await cur.fetchall())
+
+        return task_ids
+
     async def update_task_amount_and_max(self, task_id: int, new_amount: int):
         """
         Обновляет количество выполнений (amount) и максимальное количество (max_amount) задания.
@@ -2493,23 +2542,6 @@ class DataBase:
             ''', (user_id, task_id))
             return bool(await cur.fetchone())
 
-    async def is_task_failed(self, user_id: int, task_id: int) -> bool:
-        """Проверяет, провалено ли задание пользователем"""
-        async with self.con.cursor() as cur:
-            await cur.execute('''
-                SELECT 1 FROM failed_tasks 
-                WHERE user_id = ? AND task_id = ?
-            ''', (user_id, task_id))
-            return bool(await cur.fetchone())
-
-    async def is_task_pending(self, user_id: int, task_id: int) -> bool:
-        """Проверяет, находится ли задание на проверке"""
-        async with self.con.cursor() as cur:
-            await cur.execute('''
-                SELECT 1 FROM pending_reaction_tasks 
-                WHERE user_id = ? AND task_id = ? AND status = 0
-            ''', (user_id, task_id))
-            return bool(await cur.fetchone())
 
     async def is_task_skipped(self, user_id: int, task_id: int) -> bool:
         """Проверяет, пропущено ли задание пользователем"""
@@ -2884,16 +2916,16 @@ class Contest:
 
 class Boost():
     @staticmethod
-    async def add_user_boost(user_id: int, chat_id: int):
+    async def add_user_boost(user_id: int, chat_id: int, status=False):
         """Добавляет запись о бусте пользователя канала"""
         async with DB.con.cursor() as cur:
             await cur.execute('''
                 INSERT INTO user_boosts (user_id, chat_id, reward_given) 
-                VALUES (?, ?, FALSE)
+                VALUES (?, ?, ?)
                 ON CONFLICT(user_id, chat_id) DO UPDATE SET 
                     date = CURRENT_TIMESTAMP,
-                    reward_given = FALSE
-            ''', (user_id, chat_id))
+                    reward_given = excluded.reward_given
+            ''', (user_id, chat_id, status))
         await DB.con.commit()
 
     @staticmethod
@@ -2988,12 +3020,6 @@ class Boost():
             await DB.con.commit()
             return cur.rowcount > 0
 
-    async def delete_task(task_id: int) -> bool:
-        """Удаляет задание"""
-        async with DB.con.cursor() as cur:
-            await cur.execute('DELETE FROM tasks WHERE task_id = ?', (task_id,))
-            await DB.con.commit()
-            return cur.rowcount > 0
 
     async def get_paid_days_for_boost(task_id: int) -> int:
         """Возвращает количество оплаченных дней для задания на буст (значение из поля other)"""

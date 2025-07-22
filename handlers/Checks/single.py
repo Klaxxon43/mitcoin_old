@@ -1,9 +1,8 @@
 from utils.Imports import *
 from handlers.client.client import *
 from handlers.client.states import *
-from .menu import check_router
 
-@check_router.callback_query(F.data == 'single_check')
+@router.callback_query(F.data == 'single_check')
 async def create_single_check(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     user_balance = await DB.get_user_balance(user_id)
@@ -30,14 +29,14 @@ async def create_single_check(callback: types.CallbackQuery, bot: Bot):
         reply_markup=keyboard
     )
 
-@check_router.callback_query(F.data == 'customcheck_amount')
+@router.callback_query(F.data == 'customcheck_amount')
 async def custom_check_amount(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "💵 <b>Введите сумму MitCoin, которую получит пользователь за активацию чека (целое число)</b>"
     )
     await state.set_state(checks.single_check_create)
 
-@check_router.message(checks.single_check_create)
+@router.message(checks.single_check_create)
 async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FSMContext):
     user_id = message.from_user.id
     user_balance = await DB.get_user_balance(user_id)
@@ -89,7 +88,7 @@ async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FS
     except ValueError:
         await message.answer("❌ Пожалуйста, введите корректную сумму.")
 
-@check_router.callback_query(F.data.startswith('checkamount_'))
+@router.callback_query(F.data.startswith('checkamount_'))
 async def handle_check_amount(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     sum = int(callback.data.split('_')[1])

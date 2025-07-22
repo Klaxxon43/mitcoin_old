@@ -6,3 +6,4 @@ from .link import *
 from .boost import *
 from .channel import *
 from .chat import *
+from .chating import *

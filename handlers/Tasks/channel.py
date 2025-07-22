@@ -564,11 +564,14 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
         if new_amount <= 0:
             creator_id = task[1]
             await DB.delete_task(task_id)
-            await bot.send_message(
-                creator_id, 
-                "🎉 Одно из ваших заданий было успешно выполнено",
-                reply_markup=back_menu_kb(creator_id)
-            )
+            try:
+                await bot.send_message(
+                    creator_id, 
+                    "🎉 Одно из ваших заданий было успешно выполнено",
+                    reply_markup=back_menu_kb(creator_id)
+                )
+            except:
+                pass
 
         await DB.increment_statistics(1, 'all_subs_chanel')
         await DB.increment_statistics(2, 'all_subs_chanel')
