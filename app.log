@@ -80,3 +80,20 @@
 2025-07-22 14:33:42,080 - __main__ - INFO - Starting application
 2025-07-22 14:33:42,122 - werkzeug - WARNING -  * Debugger is active!
 2025-07-22 14:33:42,133 - werkzeug - INFO -  * Debugger PIN: 278-618-168
+2025-07-22 18:02:43,259 - __main__ - INFO - Starting application
+2025-07-22 18:02:43,321 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.143:5000
+2025-07-22 18:02:43,322 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-07-22 18:02:43,325 - werkzeug - INFO -  * Restarting with stat
+2025-07-22 18:02:45,267 - __main__ - INFO - Starting application
+2025-07-22 18:02:45,312 - werkzeug - WARNING -  * Debugger is active!
+2025-07-22 18:02:45,328 - werkzeug - INFO -  * Debugger PIN: 278-618-168
+2025-07-22 18:02:49,344 - __main__ - INFO - Rendering home page
+2025-07-22 18:02:49,434 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 18:02:49] "GET / HTTP/1.1" 200 -
+2025-07-22 18:02:50,156 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 18:02:50] "GET /static/css/home.css HTTP/1.1" 200 -
+2025-07-22 18:02:50,677 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 18:02:50] "GET /static/css/base.css HTTP/1.1" 200 -
+2025-07-22 18:02:50,717 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 18:02:50] "GET /static/css/profile.css HTTP/1.1" 200 -
+2025-07-22 18:02:50,759 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 18:02:50] "GET /static/js/home.js HTTP/1.1" 200 -
+2025-07-22 18:02:50,793 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 18:02:50] "GET /static/js/base.js HTTP/1.1" 200 -
