@@ -37,3 +37,46 @@
 2025-07-22 11:48:42,285 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[36mGET /static/images/profile-active.png HTTP/1.1[0m" 304 -
 2025-07-22 11:48:42,289 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
 2025-07-22 11:48:42,328 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 11:48:42] "[33mGET /auth_redirect HTTP/1.1[0m" 404 -
+2025-07-22 13:41:02,665 - __main__ - INFO - Starting application
+2025-07-22 13:41:02,738 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.143:5000
+2025-07-22 13:41:02,739 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-07-22 13:41:02,742 - werkzeug - INFO -  * Restarting with stat
+2025-07-22 13:41:05,317 - __main__ - INFO - Starting application
+2025-07-22 13:41:05,455 - werkzeug - WARNING -  * Debugger is active!
+2025-07-22 13:41:05,486 - werkzeug - INFO -  * Debugger PIN: 278-618-168
+2025-07-22 13:41:18,073 - __main__ - INFO - Rendering home page
+2025-07-22 13:41:18,410 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:18] "[35m[1mGET / HTTP/1.1[0m" 500 -
+2025-07-22 13:41:18,894 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:18] "GET /?__debugger__=yes&cmd=resource&f=style.css HTTP/1.1" 200 -
+2025-07-22 13:41:18,959 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:18] "GET /?__debugger__=yes&cmd=resource&f=debugger.js HTTP/1.1" 200 -
+2025-07-22 13:41:19,523 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:19] "GET /?__debugger__=yes&cmd=resource&f=console.png HTTP/1.1" 200 -
+2025-07-22 13:41:36,202 - __main__ - INFO - Rendering home page
+2025-07-22 13:41:36,227 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:36] "[35m[1mGET / HTTP/1.1[0m" 500 -
+2025-07-22 13:41:36,298 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:36] "[36mGET /?__debugger__=yes&cmd=resource&f=style.css HTTP/1.1[0m" 304 -
+2025-07-22 13:41:36,323 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:36] "[36mGET /?__debugger__=yes&cmd=resource&f=debugger.js HTTP/1.1[0m" 304 -
+2025-07-22 13:41:36,495 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:36] "[36mGET /?__debugger__=yes&cmd=resource&f=console.png HTTP/1.1[0m" 304 -
+2025-07-22 13:41:48,883 - __main__ - INFO - Rendering home page
+2025-07-22 13:41:48,924 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:48] "[35m[1mGET / HTTP/1.1[0m" 500 -
+2025-07-22 13:41:48,994 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:48] "[36mGET /?__debugger__=yes&cmd=resource&f=style.css HTTP/1.1[0m" 304 -
+2025-07-22 13:41:49,019 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:49] "[36mGET /?__debugger__=yes&cmd=resource&f=debugger.js HTTP/1.1[0m" 304 -
+2025-07-22 13:41:49,196 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:49] "[36mGET /?__debugger__=yes&cmd=resource&f=console.png HTTP/1.1[0m" 304 -
+2025-07-22 13:41:56,780 - __main__ - INFO - Rendering home page
+2025-07-22 13:41:56,825 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:56] "[35m[1mGET / HTTP/1.1[0m" 500 -
+2025-07-22 13:41:56,908 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:56] "[36mGET /?__debugger__=yes&cmd=resource&f=style.css HTTP/1.1[0m" 304 -
+2025-07-22 13:41:56,937 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:56] "[36mGET /?__debugger__=yes&cmd=resource&f=debugger.js HTTP/1.1[0m" 304 -
+2025-07-22 13:41:57,131 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:41:57] "[36mGET /?__debugger__=yes&cmd=resource&f=console.png HTTP/1.1[0m" 304 -
+2025-07-22 13:42:55,357 - __main__ - INFO - Rendering home page
+2025-07-22 13:42:55,516 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:42:55] "GET / HTTP/1.1" 200 -
+2025-07-22 13:42:56,108 - werkzeug - INFO - 192.168.1.143 - - [22/Jul/2025 13:42:56] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2025-07-22 14:29:18,068 - werkzeug - INFO -  * Detected change in 'C:\\Users\\Программирование\\mit coin\\site\\app.py', reloading
+2025-07-22 14:29:18,426 - werkzeug - INFO -  * Restarting with stat
+2025-07-22 14:29:21,467 - __main__ - INFO - Starting application
+2025-07-22 14:29:21,533 - werkzeug - WARNING -  * Debugger is active!
+2025-07-22 14:29:21,553 - werkzeug - INFO -  * Debugger PIN: 278-618-168
+2025-07-22 14:33:40,877 - werkzeug - INFO -  * Detected change in 'C:\\Users\\Программирование\\mit coin\\site\\app.py', reloading
+2025-07-22 14:33:40,996 - werkzeug - INFO -  * Restarting with stat
+2025-07-22 14:33:42,080 - __main__ - INFO - Starting application
+2025-07-22 14:33:42,122 - werkzeug - WARNING -  * Debugger is active!
+2025-07-22 14:33:42,133 - werkzeug - INFO -  * Debugger PIN: 278-618-168

@@ -1,21 +1,49 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram App</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
-    {% block css %}{% endblock %}
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Telegram Mini App{% endblock %}</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/profile.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  {% block css %}{% endblock %}
 </head>
 <body>
-    <div class="page-container">
-        <main class="main-content">
-            {% block content %}{% endblock %}
-        </main>
-        {% include 'footer.html' %}
+  <header id="app-header" class="hidden">
+    <div class="header-user">
+      <img id="user-avatar" src="" alt="Аватар" class="avatar">
+      <span id="user-name">Загрузка...</span>
     </div>
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-    {% block js %}{% endblock %}
+    <div id="header-ton-connect"></div>
+  </header>
+
+  <div id="app-content" class="hidden">
+    {% block content %}{% endblock %}
+    <div id="status" class="status"></div>
+  </div>
+
+  <div id="telegram-only-message" class="telegram-only hidden">
+    <h2>🔒 Требуется Telegram Mini App</h2>
+    <p>Это приложение работает только внутри Telegram.</p>
+    <p>Пожалуйста, откройте эту страницу в Telegram.</p>
+  </div>
+
+  <footer id="footer-menu" class="footer-menu hidden">
+    <div class="menu-item {% if request.path == '/' %}active{% endif %}" data-route="/">
+      <i class="fas fa-home menu-icon"></i>
+      <span class="menu-label">Главная</span>
+    </div>
+    <div class="menu-item {% if request.path == '/profile' %}active{% endif %}" data-route="/profile">
+      <i class="fas fa-user menu-icon"></i>
+      <span class="menu-label">Профиль</span>
+    </div>
+  </footer>
+
+  <script src="{{ url_for('static', filename='js/base.js') }}"></script>
+  {% block js %}{% endblock %}
 </body>
 </html>

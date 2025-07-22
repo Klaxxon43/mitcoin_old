@@ -1,14 +1,39 @@
 {% extends "base.html" %}
+{% block title %}Главная страница{% endblock %}
 
-{% block styles %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+{% block css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
 {% endblock %}
 
 {% block content %}
-  <div class="home-container">
-    <h1 class="home-title">Главное меню</h1>
-    <div class="home-content">
-      <p>Здесь будет основное содержимое вашего приложения</p>
+<div class="welcome-card">
+  <h2>Добро пожаловать!</h2>
+  <div id="welcome-message">Загрузка...</div>
+</div>
+
+<div class="actions-card">
+  <h3>Быстрые действия</h3>
+  <div class="actions-grid">
+    <div class="action-item">
+      <i class="fas fa-wallet"></i>
+      <span>Кошелек</span>
+    </div>
+    <div class="action-item">
+      <i class="fas fa-exchange-alt"></i>
+      <span>Переводы</span>
+    </div>
+    <div class="action-item">
+      <i class="fas fa-history"></i>
+      <span>История</span>
+    </div>
+    <div class="action-item">
+      <i class="fas fa-cog"></i>
+      <span>Настройки</span>
     </div>
   </div>
+</div>
+{% endblock %}
+
+{% block js %}
+<script src="{{ url_for('static', filename='js/home.js') }}"></script>
 {% endblock %}

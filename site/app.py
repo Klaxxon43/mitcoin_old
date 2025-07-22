@@ -142,6 +142,38 @@ def get_user_data():
             "message": "Internal server error"
         }), 500
 
+from urllib.parse import parse_qs
+
+@application.route("/me", methods=["GET"])
+@telegram_auth_required
+def me():
+    try:
+        init_data_raw = session.get("init_data")
+        if not init_data_raw:
+            return jsonify({"status": "error", "message": "No initData in session"}), 401
+        
+        # Парсим initData и достаём user_id
+        init_data = parse_qs(init_data_raw)
+        user_id = init_data.get("user[id]", [None])[0] or init_data.get("user_id", [None])[0]
+        if not user_id:
+            return jsonify({"status": "error", "message": "user_id not found in initData"}), 400
+
+        # Получаем данные пользователя
+        user_data = make_api_request("get_user", {"user_id": user_id})
+        balance_data = make_api_request("get_balance", {"user_id": user_id})
+        
+        return jsonify({
+            "status": "success",
+            "user": {
+                **user_data,
+                "balance": balance_data.get("balance", 0)
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error in /me: {str(e)}")
+        return jsonify({"status": "error", "message": "Internal server error"}), 500
+
+
 @application.route("/logout", methods=["POST"])
 def logout():
     session.clear()
