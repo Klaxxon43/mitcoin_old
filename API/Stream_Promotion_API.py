@@ -72,6 +72,8 @@ class StreamPromotionAPI:
         :param runs: Количество запусков (опционально)
         :param interval: Интервал между запусками в минутах (опционально)
         :param comments: Кастомные комментарии (опционально)
+        
+        :return: Словарь с ответом API или None в случае ошибки
         """
         data = {
             "key": self.api_key,
@@ -88,7 +90,26 @@ class StreamPromotionAPI:
         if comments:
             data["comments"] = comments
             
-        return await self._make_request(data)
+        try:
+            response = await self._make_request(data)
+            
+            if not response:
+                print("Пустой ответ от API при создании заказа")
+                return None
+                
+            if isinstance(response, dict) and 'error' in response:
+                print(f"API вернул ошибку: {response['error']}")
+                return None
+                
+            if isinstance(response, dict) and 'order' in response:
+                return response
+                
+            print(f"Неожиданный формат ответа от API: {response}")
+            return None
+            
+        except Exception as e:
+            print(f"Ошибка при создании заказа: {str(e)}")
+            return None
     
     async def get_order_status(self, order_id: int) -> Dict[str, Any]:
         """

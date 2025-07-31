@@ -28,16 +28,16 @@ async def create_payment2():
     #             response_data = await response.json()
                 
     #             if response_data.get("status") == "success":
-    #                 print("Платеж успешно создан!")
-    #                 print(f"ID платежа: {response_data['data']['payment_id']}")
-    #                 print(f"Сумма: {response_data['data']['amount'] / 100} {response_data['data']['currency']}")
-    #                 print(f"Ссылка на оплату: {response_data['data']['link']}")
+    #                 logger.info("Платеж успешно создан!")
+    #                 logger.info(f"ID платежа: {response_data['data']['payment_id']}")
+    #                 logger.info(f"Сумма: {response_data['data']['amount'] / 100} {response_data['data']['currency']}")
+    #                 logger.info(f"Ссылка на оплату: {response_data['data']['link']}")
     #             else:
-    #                 print("Ошибка при создании платежа:")
-    #                 print(response_data.get("data", {}).get("message", "Неизвестная ошибка"))
+    #                 logger.info("Ошибка при создании платежа:")
+    #                 logger.info(response_data.get("data", {}).get("message", "Неизвестная ошибка"))
                     
         # except Exception as e:
-        #     print(f"Произошла ошибка: {e}")
+        #     logger.info(f"Произошла ошибка: {e}")
 
 # Запуск асинхронной функции
 # asyncio.run(create_payment2())

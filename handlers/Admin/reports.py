@@ -58,7 +58,7 @@ async def check_admin_and_get_invite_link_report(bot, chat_id):
                         return "Бот был забанен в чате, либо не является админом"
                     return invite_link
                 except Exception as e:
-                    print(f'Ошибка получения инвайта для {chat_id}, ошибка - {e}')
+                    logger.error(f'[REPORTS] Ошибка получения инвайта для {chat_id}, ошибка - {e}')
                     return "Бот был забанен в чате, либо не является админом"
         return "Бот был забанен в чате, либо не является админом"
     except:

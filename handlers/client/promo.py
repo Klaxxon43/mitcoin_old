@@ -48,7 +48,7 @@ async def process_promo_activation(message: types.Message, state: FSMContext, bo
         try:
             end_time = datetime.strptime(promo[8], "%Y-%m-%d %H:%M:%S")
         except ValueError as e:
-            print(f"Ошибка при разборе даты промокода {promo_name}: {e}")
+            logger.info(f"Ошибка при разборе даты промокода {promo_name}: {e}")
             await Promo.delete(promo_name)
             await message.answer("❌ Промокод поврежден и был удален")
             await state.clear()
@@ -109,14 +109,14 @@ async def process_promo_activation(message: types.Message, state: FSMContext, bo
                     f"Все {promo[6]} активаций были использованы."
                 )
             except Exception as e:
-                print(f"Ошибка при уведомлении создателя промокода: {e}")
+                logger.info(f"Ошибка при уведомлении создателя промокода: {e}")
         
         await message.answer(
             f"✅ Промокод активирован!\n"
             f"💎 Вам начислено {promo[3]:.0f} на {bonus_type}!"
         )
     except Exception as e:
-        print(f"Ошибка при активации промокода: {e}")
+        logger.info(f"Ошибка при активации промокода: {e}")
         await message.answer("❌ Произошла ошибка при активации промокода")
     finally:
         await state.clear()

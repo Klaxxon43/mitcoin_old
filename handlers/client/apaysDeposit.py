@@ -125,7 +125,7 @@ async def save_payment_data(user_id: int, amount: float, currency: str, order_id
         'created_at': datetime.now().isoformat()
     }
     # Реализуйте сохранение в вашу БД
-    print(f"Saving payment: {payment_data}")
+    logger.info(f"Saving payment: {payment_data}")
 
 async def process_successful_payment(user_id: int, amount: float, currency: str, order_id: str, bot: Bot, callback: types.CallbackQuery):
     """Обработка успешного платежа"""

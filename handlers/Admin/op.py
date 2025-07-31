@@ -323,7 +323,7 @@ async def process_name(message: types.Message, state: FSMContext):
 @admin.callback_query(F.data.startswith('channel:'))
 async def process_channel_button(callback_query: types.CallbackQuery):
     channel_id = callback_query.data.split(':')[1]
-    print(channel_id)
+    logger.info(channel_id)
     channel_info = await DB.get_channel_info(channel_id)
 
     if not channel_info:
@@ -384,7 +384,7 @@ async def process_new_username(message: types.Message, state: FSMContext):
 @admin.callback_query(F.data.startswith('opdelete:'))
 async def delete_channel(callback_query: types.CallbackQuery):
     channel_id = callback_query.data.split(':')[1]
-    print(channel_id)
+    logger.info(channel_id)
     await DB.delete_channel(channel_id)
     await callback_query.message.answer("Канал успешно удален.")
     await callback_query.answer()

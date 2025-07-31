@@ -157,7 +157,7 @@ async def handle_chat_selection(message: types.Message, state: FSMContext, bot: 
             return
 
     except Exception as e:
-        print("Ошибка при проверке чата:", e)
+        logger.info("Ошибка при проверке чата:", e)
         await message.answer("❌ Ошибка при проверке чата. Убедитесь, что бот добавлен в чат с правами администратора.")
         return
 
@@ -234,85 +234,176 @@ async def check_chat_admin_rights(callback: types.CallbackQuery, state: FSMConte
         await state.clear()
 
     except Exception as e:
-        print("Ошибка в check_chat_admin_rights:", e)
+        logger.info("Ошибка в check_chat_admin_rights:", e)
         await callback.message.edit_text("⚠ Произошла ошибка при повторной проверке. Попробуйте позже.")
         
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 @tasks.callback_query(F.data == 'work_chat')
 async def tasksschat_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
+    await callback.answer()
 
     try:
-        # Получаем задания из Redis или БД
-        all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
-        if not all_tasks:
-            await RedisTasksManager.refresh_task_cache(bot, 'chat')
-            all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
+        # 1. Получаем задания из кэша
+        cached_tasks = await RedisTasksManager.get_cached_tasks('chat')
+        
+        # Если кэш пуст, обновляем его
+        if not cached_tasks:
+                await callback.message.edit_text(
+                    "⛔ Нет доступных заданий на чаты",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
+                return
 
-        print("Задания для фильтрации:", all_tasks)
-
-        filtered_tasks = []
-        for task in all_tasks:
-            print("Проверка задания:", task)
+        # 2. Фильтруем задания для текущего пользователя
+        available_tasks = []
+        for task in cached_tasks:
             try:
                 task_id = task["id"]
-                if not await DB.is_task_completed(user_id, task_id):
-                    filtered_tasks.append(task)
-            except Exception as inner_e:
-                print(f"Ошибка при фильтрации задания {task}: {inner_e}")
+                if await DB.is_task_available_for_user(user_id, task['id']):
+                    available_tasks.append(task)
+            except Exception as e:
+                logger.info(f"Ошибка проверки задания {task.get('id')}: {e}")
+                continue
 
-        tasks = filtered_tasks
+        # 3. Перемешиваем задания в случайном порядке
+        random.shuffle(available_tasks)
 
-
-        if tasks:
-            random.shuffle(tasks)
-            keyboard = await generate_tasks_keyboard_chat(tasks, bot)
-
-            await callback.message.edit_text(
-                "👤 <b>Задания на чаты:</b>\n\n🎢 Чаты в списке располагаются по количеству необходимых участников\n\n⚡<i>Запрещено покидать чат раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-                reply_markup=keyboard
-            )
+        # 4. Показываем результат пользователю
+        if available_tasks:
+            try:
+                keyboard = await generate_tasks_keyboard_chat(available_tasks, bot, user_id)
+                await callback.message.edit_text(
+                    "👤 <b>Задания на чаты:</b>\n\n"
+                    "🎢 Чаты отображаются в случайном порядке\n\n"
+                    "⚡<i>Запрещено покидать чат раньше чем через 7 дней, "
+                    "в случае нарушения возможен штраф!</i>\n\n"
+                    f"📊 Доступно заданий: {len(available_tasks)}",
+                    reply_markup=keyboard
+                )
+            except Exception as e:
+                logger.info(f"Ошибка формирования клавиатуры: {e}")
+                await callback.message.edit_text(
+                    "Произошла ошибка при формировании списка заданий",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
         else:
             await callback.message.edit_text(
-                "На данный момент доступных заданий нет, возвращайся позже 😉",
+                "⛔ Вы выполнили все доступные задания",
                 reply_markup=back_work_menu_kb(user_id)
             )
+
     except Exception as e:
-        print(f"Ошибка в tasksschat_handler: {e}")
+        logger.info(f"Критическая ошибка в tasksschat_handler: {e}")
         builder = InlineKeyboardBuilder()
         builder.add(InlineKeyboardButton(text="🔄 Обновить", callback_data="work_chat"))
         await callback.message.edit_text(
-            "Произошла ошибка при загрузке заданий. Попробуйте обновить страницу.",
+            "⚠️ Произошла ошибка при загрузке заданий. Попробуйте обновить.",
             reply_markup=builder.as_markup()
         )
 
-        
 
-async def generate_tasks_keyboard_chat(tasks, bot):
+async def generate_tasks_keyboard_chat(tasks, bot, user_id):
     builder = InlineKeyboardBuilder()
+    valid_tasks = 0
 
-    # Выводим задания (по 5 на страницу)
-    for task in tasks[:5]:  # Ограничиваем количество заданий на одной странице
-        chat_id = task["target_id"]
-        task_id = task["id"]
+    for task in tasks[:5]:  # Ограничиваем 5 заданиями на странице
         try:
-            chat = await bot.get_chat(chat_id)
-            chat_title = chat.title
-        except Exception:
-            chat_title = "Неизвестный чат"
+            task_id = task["id"]
+            chat_id = task["target_id"]
+            
+            # Пропускаем задания с amount <= 0
+            if task["amount"] <= 0:
+                continue
+                
+            # Получаем информацию о чате
+            try:
+                chat = await bot.get_chat(chat_id)
+                chat_title = chat.title
+                
+                # Пытаемся получить ссылку разными способами
+                try:
+                    invite_link = await bot.export_chat_invite_link(chat_id)
+                except:
+                    try:
+                        invite_link = chat.invite_link
+                    except:
+                        invite_link = None
+                        
+                # Если ссылки нет, создаем кнопку без ссылки
+                if not invite_link:
+                    builder.row(
+                        InlineKeyboardButton(
+                            text=f"💬 {chat_title} | +1500 MIT",
+                            callback_data=f"chatinfo_{task_id}"
+                        )
+                    )
+                else:
+                    builder.row(
+                        InlineKeyboardButton(
+                            text=f"💬 {chat_title} | +1500 MIT",
+                            url=invite_link
+                        ),
+                        InlineKeyboardButton(
+                            text="✅ Проверить",
+                            callback_data=f"chatcheck_{task_id}"
+                        )
+                    )
+                valid_tasks += 1
+                
+            except Exception as e:
+                logger.info(f"Ошибка получения чата {chat_id}: {e}")
+                continue
 
-        button_text = f"{chat_title} | +1500"
-        builder.row(InlineKeyboardButton(text=button_text, callback_data=f"chattask_{task_id}"))
+        except Exception as e:
+            logger.info(f"Ошибка формирования кнопки задания: {e}")
+            continue
 
-    # Кнопка "Назад"
-    builder.row(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
+    if valid_tasks == 0:
+        builder.row(
+            InlineKeyboardButton(
+                text="⛔ Нет доступных заданий",
+                callback_data="no_tasks"
+            )
+        )
 
-    # Кнопка "Обновить"
-    builder.row(InlineKeyboardButton(text="🔄 Обновить", callback_data="work_chat"))
+    # Добавляем кнопки навигации
+    builder.row(
+        InlineKeyboardButton(text="🔄 Обновить", callback_data="work_chat")
+    )
+    builder.row(
+        InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"),
+    )
 
     return builder.as_markup()
 
+async def get_chat_invite_link(bot, chat_id):
+    try:
+        chat = await bot.get_chat(chat_id)
+        if hasattr(chat, 'invite_link') and chat.invite_link:
+            return chat.invite_link
+        
+        # Если нет публичной ссылки, пытаемся создать
+        try:
+            invite_link = await bot.export_chat_invite_link(chat_id)
+            return invite_link
+        except:
+            return None
+    except:
+        return None
 
 @tasks.callback_query(lambda c: c.data.startswith("chattask_"))
 async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
@@ -320,111 +411,145 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
     task_id = int(callback.data.split('_')[1])
     task = await DB.get_task_by_id(task_id)
 
-    amount = task[3]
+    if not task:
+        await callback.message.edit_text("❗ Задание не найдено", reply_markup=back_work_menu_kb(callback.from_user.id))
+        return
 
-    invite_link = await check_admin_and_get_invite_link_chat(bot, task[2])
     chat_id = task[2]
-    chat = await bot.get_chat(chat_id)
-    task_info = f"""
-👤 {chat.title} | <i>{amount}</i>
-<i>Вступите в чат и нажмите кнопку -</i> <b>Проверить</b> 🔄️
+    amount = task[3]
+    
+    try:
+        chat = await bot.get_chat(chat_id)
+        invite_link = await get_chat_invite_link(bot, chat_id)
+        
+        task_info = f"""
+👤 <b>{chat.title}</b> | {amount} участников
+💰 Награда: <b>1500 MIT</b>
 
-{invite_link}    
-    """
-    builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="Проверить 🔄️", callback_data=f"chatcheck_{task_id}"))
-    builder.add(InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}"))
-    builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_chat_{task_id}"))
-    builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_chat"))
-    builder.adjust(1, 2, 1)
-    await callback.message.edit_text(task_info, reply_markup=builder.as_markup())
+⚡ Вступите в чат и нажмите кнопку <b>Проверить</b>
+"""
+        builder = InlineKeyboardBuilder()
+        
+        if invite_link:
+            builder.row(
+                InlineKeyboardButton(text="💬 Перейти в чат", url=invite_link),
+                InlineKeyboardButton(text="✅ Проверить", callback_data=f"chatcheck_{task_id}")
+            )
+        else:
+            builder.row(InlineKeyboardButton(text="✅ Проверить", callback_data=f"chatcheck_{task_id}"))
+            
+        builder.row(
+            InlineKeyboardButton(text="⏭ Пропустить", callback_data="work_chat"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="⚠️ Репорт", callback_data=f"report_chat_{task_id}")
+        )
+        await callback.message.edit_text(task_info, reply_markup=builder.as_markup())
+        
+    except Exception as e:
+        logger.info(f"Ошибка в task_detail_handler: {e}")
+        await callback.message.edit_text(
+            "❗ Произошла ошибка при загрузке задания",
+            reply_markup=back_work_menu_kb(callback.from_user.id)
+        )
+
+@tasks.callback_query(lambda c: c.data.startswith("chatinfo_"))
+async def show_chat_info(callback: types.CallbackQuery, bot: Bot):
+    task_id = int(callback.data.split('_')[1])
+    task = await DB.get_task_by_id(task_id)
+    
+    if not task:
+        await callback.answer("Задание не найдено", show_alert=True)
+        return
+        
+    chat_id = task[2]
+    
+    try:
+        chat = await bot.get_chat(chat_id)
+        await callback.answer(
+            f"ℹ️ {chat.title}\n\n"
+            "К сожалению, бот не может получить ссылку на этот чат. "
+            "Попробуйте найти чат через поиск или обратитесь к администратору.",
+            show_alert=True
+        )
+    except:
+        await callback.answer("Не удалось получить информацию о чате", show_alert=True)
 
 
 @tasks.callback_query(F.data.startswith('chatcheck_'))
 async def check_subscription_chat(callback: types.CallbackQuery, bot: Bot):
-    await callback.answer()
-    task_id = int(callback.data.split('_')[1])
-    task = await DB.get_task_by_id(task_id)
-    if task is None:
-        await callback.message.edit_text("❗ Задание не найдено или уже выполнено", reply_markup=back_menu_kb(user_id))
-        await asyncio.sleep(1)
-        return
-
     user_id = callback.from_user.id
-    target_id = task[2]
-    invite_link = await check_admin_and_get_invite_link_chat(bot, task[2])
-
-    # Проверяем, подписан ли пользователь на чат
+    task_id = int(callback.data.split('_')[1])
+    
     try:
-        bot_member = await bot.get_chat_member(target_id, callback.message.chat.id)
-        if bot_member.status != "member":
-            builder = InlineKeyboardBuilder()
-            builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_chat"))
-            builder.add(InlineKeyboardButton(text="Проверить 🔄️", callback_data=f"chatcheck_{task_id}"))
-            await callback.message.edit_text(
-                f"🚩 Пожалуйста, <b>вступите в чат</b> по ссылке {invite_link} и повторите попытку",
-                reply_markup=builder.as_markup())
+        task = await DB.get_task_by_id(task_id)
+        if not task or task[3] <= 0:  # Проверяем amount
+            await callback.answer("❗ Задание не найдено или завершено", show_alert=True)
             return
+
+        chat_id = task[2]
+        
+        # Проверяем подписку пользователя
+        try:
+            member = await bot.get_chat_member(chat_id, user_id)
+            if member.status not in ['member', 'administrator', 'creator']:
+                await callback.answer("❗ Вы не подписаны на чат", show_alert=True)
+                return
+                
+            if not await DB.is_task_completed(user_id, task_id):
+                # Обновляем задание
+                new_amount = task[3] - 1
+                await DB.update_task_amount(task_id, new_amount)
+                await DB.add_completed_task(user_id, task_id, chat_id, 1500, task[1], status=1)
+                await DB.add_balance(user_id=user_id, amount=1500)
+
+                # Обновляем статистику
+                await DB.increment_statistics(1, 'all_subs_groups')
+                await DB.increment_statistics(2, 'all_subs_groups')
+                await DB.increment_statistics(1, 'all_taasks')
+                await DB.increment_statistics(2, 'all_taasks')
+                await update_dayly_and_weekly_tasks_statics(user_id)
+
+                if new_amount <= 0:
+                    await DB.delete_task(task_id)
+                    await RedisTasksManager.refresh_task_cache(bot, "chat")
+                    await bot.send_message(
+                        task[1],
+                        "🎉 Ваше задание на чат было успешно выполнено!",
+                        reply_markup=back_menu_kb(task[1])
+                    )
+
+                await callback.answer("✅ Вы успешно выполнили задание! +1500 MIT", show_alert=True)
+                
+                # Обновляем список
+                cached_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
+                available_tasks = []
+                for t in cached_tasks:
+                    if t["amount"] > 0 and not await DB.is_task_completed(user_id, t["id"]):
+                        available_tasks.append(t)
+                
+                random.shuffle(available_tasks)
+                keyboard = await generate_tasks_keyboard_chat(available_tasks, bot, user_id)
+                
+                await callback.message.edit_text(
+                    "👤 <b>Задания на чаты:</b>\n\n"
+                    "🎢 Чаты отображаются в случайном порядке\n\n"
+                    "⚡<i>Запрещено покидать чат раньше чем через 7 дней, "
+                    "в случае нарушения возможен штраф!</i>\n\n"
+                    f"📊 Доступно заданий: {len(available_tasks)}",
+                    reply_markup=keyboard
+                )
+            else:
+                await callback.answer("❗ Вы уже выполняли это задание", show_alert=True)
+                
+        except Exception as e:
+            logger.info(f"Ошибка проверки подписки: {e}")
+            await callback.answer("❗ Ошибка проверки подписки. Попробуйте позже", show_alert=True)
+            
     except Exception as e:
-        print(f"Ошибка при проверке подписки: {e}")
-        builder = InlineKeyboardBuilder()
-        builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_chat"))
-        builder.add(InlineKeyboardButton(text="Проверить 🔄️", callback_data=f"chatcheck_{task_id}"))
-
-        await callback.message.edit_text(
-            f"🚩 Пожалуйста, <b>вступите в чат</b> по ссылке {invite_link} и повторите попытку",
-            reply_markup=builder.as_markup())
-        return
-
-    if not await DB.is_task_completed(user_id, task[0]):
-        # Обновляем задание (вычитаем amount на 1)
-        await DB.update_task_amount(task_id)
-        await DB.add_completed_task(user_id, task_id, target_id, 1500, task[1], status=1)
-        await DB.add_balance(amount=1500, user_id=user_id)
-
-        # Проверяем, нужно ли удалить задание
-        updated_task = await DB.get_task_by_id(task_id)
-        if updated_task[3] == 0:
-            delete_task = await DB.get_task_by_id(task_id)
-            creator_id = delete_task[1]
-            await DB.delete_task(task_id)
-            await RedisTasksManager.refresh_task_cache(bot, "chat")
-            await bot.send_message(creator_id, f"🎉 Одно из ваших заданий было успешно выполнено",
-                                   reply_markup=back_menu_kb(user_id))
-
-
-        await DB.increment_statistics(1, 'all_subs_groups')
-        await DB.increment_statistics(2, 'all_subs_groups')
-        await DB.increment_statistics(1, 'all_taasks')
-        await DB.increment_statistics(2, 'all_taasks')
-        await update_dayly_and_weekly_tasks_statics(user_id)
-        await callback.message.edit_text("✅")
-        await callback.answer("+1500")
-        await asyncio.sleep(2)
-    else:
-        await callback.message.edit_text("‼ Вы уже выполнили это задание", reply_markup=back_menu_kb(user_id))
-        await asyncio.sleep(3)
-
-    # Обновляем список заданий после выполнения
-    all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
-    tasks = [
-        task for task in all_tasks if not await DB.is_task_completed(user_id, task[0])
-    ]
-
-    if tasks:
-        random.shuffle(tasks)
-        keyboard = await generate_tasks_keyboard_chat(tasks, bot)
-        await callback.message.edit_text(
-            "👤 <b>Задания на чаты:</b>\n\n🎢 Чаты в списке располагаются по количеству необходимых участников\n\n⚡<i>Запрещено покидать чат раньше чем через 7 дней, в случае нарушения возможен штраф!</i>",
-            reply_markup=keyboard
-        )
-    else:
-        await callback.message.edit_text(
-            "На данный момент доступных заданий нет, возвращайся позже 😉",
-            reply_markup=back_work_menu_kb(user_id)
-        )
-
-
+        logger.info(f"Критическая ошибка в check_subscription_chat: {e}")
+        await callback.answer("⚠ Произошла ошибка при проверке", show_alert=True)
+        
 class ChatReport(StatesGroup):
     desc = State()
 

@@ -113,13 +113,13 @@ async def handle_set_ref_fund(message: types.Message, state: FSMContext, bot: Bo
         amount_per_check = data.get('amount_per_check')
         total_amount = data.get('total_amount') 
         referral_percent = data.get('referral_percent')
-        print(total_amount)
+        logger.info(total_amount)
         total_amount = total_amount//quantity 
-        print(total_amount)
+        logger.info(total_amount)
         # Рассчитываем общую сумму списания
         total_deduction = total_amount * quantity + ( total_amount * (referral_percent / 100) * ref_fund ) 
-        print(total_deduction) 
-        print(f'{total_amount} * {quantity} + ( {total_amount} * ({referral_percent / 100}) * {ref_fund} ) = {total_deduction}')
+        logger.info(total_deduction) 
+        logger.info(f'{total_amount} * {quantity} + ( {total_amount} * ({referral_percent / 100}) * {ref_fund} ) = {total_deduction}')
         # Списание с баланса
         user_id = message.from_user.id
         user_balance = await DB.get_user_balance(user_id)
@@ -187,7 +187,7 @@ async def disable_referral(callback: types.CallbackQuery, state: FSMContext, bot
     quantity = data.get('quantity')
     amount_per_check = data.get('amount_per_check')
     total_amount = quantity * amount_per_check
-    print(f'{quantity} * {amount_per_check}')
+    logger.info(f'{quantity} * {amount_per_check}')
 
     # Создаем чек без реферального фонда
     uid = str(uuid.uuid4())

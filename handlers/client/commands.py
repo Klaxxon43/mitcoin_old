@@ -3,7 +3,7 @@ from .client import *
 @router.message(Command('id'))
 async def _(message: types.Message, bot: Bot):
     username = message.text.split()[1]
-    print(username)
+    logger.info(username)
     id = str(await DB.get_id_from_username(username)).replace("(", "").replace(")", "").replace(",","")
     await message.answer(f'ID Этого пользователя: <code>{id}</code>')
 
@@ -81,7 +81,7 @@ async def handle_db_command(message: types.Message):
     # Получаем текст запроса
     if len(message.text.split()) > 1:
         query = ' '.join(message.text.split()[1:])
-    print(query)
+    logger.info(query)
 
     if not query:
         await message.answer("❌ Укажите SQL-запрос после команды /db.")

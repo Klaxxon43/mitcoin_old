@@ -21,6 +21,7 @@ from handlers.Tasks.tasks import tasks
 from handlers.Tasks.redis_task_manager import RedisTasksManager
 from handlers.Admin.contest import on_startup as on_startup_contest
 from handlers.Background.bg_tasks import restore_background_tasks, check_all_active_boosts, start_background_tasks
+from zoneinfo import ZoneInfo
 
 logging.basicConfig(level=logging.INFO)
 
@@ -41,23 +42,34 @@ async def on_startup(bot: Bot) -> None:
     # asyncio.create_task(check_recurring_contests(bot))  # Добавлено
     asyncio.create_task(RedisTasksManager.start_periodic_check(bot))
 
-
-
-
 async def daily_task(bot: Bot):
-    await DB.reset_daily_statistics()
-    await reset_daily_and_weekly_tasks(bot)
-    print("✅ Выполнена задача 00:00 по МСК")
+    # ⁡⁣⁣⁢Ежедневные задания⁡
+    try:
+        logger.info('[daily] Выполняю reset_daily_statistics')
+        await DB.reset_daily_statistics()
+        logger.info('[daily] reset_daily_statistics выполнена')
 
+        now_moscow = datetime.now(ZoneInfo("Europe/Moscow"))
+        if now_moscow.weekday() == 0:  # Понедельник по МСК
+            await DB.reset_weekly_statistics()
+        
+        await reset_daily_and_weekly_tasks(bot)
+        logger.info("✅ Выполнена задача 00:00 по МСК")
+    except Exception as e:
+        logger.error(f'Ошибка при выполнении задачи 00:00 по МСК\n\nОшибка:{e}')
+        for id in ADMINS_ID:
+            await bot.send_message(id, f'Ошибка при выполнении задачи 00:00 по МСК\n\nОшибка:{e} \n😭Исправь меня')
 
 async def run_scheduler(bot: Bot):
+    logger.info("[Scheduler] Запущен run_scheduler") 
     msk_timezone = pytz.timezone('Europe/Moscow')
     while True:
             now = datetime.now(msk_timezone)
             next_midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
             seconds = (next_midnight - now).total_seconds()
-            print(f"[Scheduler] Следующее срабатывание через {seconds} секунд")
+            logger.info(f"[Scheduler] Следующее срабатывание через {seconds} секунд")
             await asyncio.sleep(seconds)
+            logger.info('[Scheduler] выполняю')
             await daily_task(bot)
 
 
@@ -66,7 +78,7 @@ async def reset_daily_and_weekly_tasks(bot: Bot):
         await cur.execute('''
             UPDATE users 
             SET 
-                daily_completed_task = 0,
+                dayly_completed_task = 0,
                 last_daily_reset = datetime('now')
             WHERE 
                 datetime(last_daily_reset) < datetime('now', '-1 day')
@@ -85,7 +97,7 @@ async def reset_daily_and_weekly_tasks(bot: Bot):
 
         await DB.con.commit()
 
-    print("[Reset] Сброс ежедневных/еженедельных задач выполнен")
+    logger.debug("[Reset] Сброс ежедневных/еженедельных задач выполнен")
 
 
 async def main():
@@ -96,7 +108,7 @@ async def main():
     dp.startup.register(on_startup)
     # dp.shutdown.register(on_shutdown)
 
-    print("[Bot] Запуск polling...")
+    logger.info("[Bot] Запуск polling...")
     await dp.start_polling(bot, skip_updates=False)
 
 

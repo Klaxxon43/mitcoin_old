@@ -23,10 +23,10 @@ async def checks_menu(callback: types.CallbackQuery, bot: Bot):
             if chat_member.status not in ['member', 'administrator', 'creator']:
                 not_subscribed.append(channel)
         except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
+            logger.info(f"Ошибка при проверке подписки: {e}")
 
     if not_subscribed:
-        print(f'https://t.me/{channel[0].replace("@", "")}')
+        logger.info(f'https://t.me/{channel[0].replace("@", "")}')
         # Если пользователь не подписан на некоторые каналы
         keyboard = InlineKeyboardBuilder()
         for channel in not_subscribed:
@@ -63,7 +63,7 @@ async def generate_tasks_keyboard_checks(checks, checkspage, total_pages):
 
     # Выводим задания на текущей странице (по 5 на страницу)
     for check in checks:
-        print(check)
+        logger.info(check)
         check_type = CHECKS_TYPES.get(check[3], 'Неизвестно')
         amount = check[4]
         button_text = f"{check_type} | {amount} $MICO"
@@ -97,7 +97,7 @@ def checkspaginate_tasks(checks, checkspage=1, per_page=5):
 async def my_checks(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     checks = await DB.get_check_by_user_id(user_id)
-    print(checks)
+    logger.info(checks)
     # Начинаем с первой страницы
     checkspage = 1
     tasks_on_page, total_pages = paginate_tasks(checks, checkspage)
@@ -362,7 +362,7 @@ async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FS
             )
             back_button = InlineKeyboardButton(text="🔙 Назад", callback_data=f"check_{check_id}")
             keyboard = InlineKeyboardMarkup(inline_keyboard=[[add_bot_button], [back_button]])
-            print(channel_id)
+            logger.info(channel_id)
             await message.answer(
                 '❗ Бот не является администратором этого канала.\n\n'
                 '1. Добавьте бота в канал как администратора.\n'
@@ -379,8 +379,8 @@ async def handle_custom_check_amount(message: types.Message, bot: Bot, state: FS
         await state.clear()
 
     except Exception as e:
-        print(e)
-        print(channel_id)
+        logger.info(e)
+        logger.info(channel_id)
         await message.answer('☹ Не удалось найти канал, либо произошла ошибка. Повторите попытку.')
         return
 

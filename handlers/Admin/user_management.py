@@ -57,7 +57,7 @@ async def get_user_profile(message: types.Message, state: FSMContext):
             await message.answer('Пользователь не найден 😓')
     except Exception as e:
         await message.answer(f"Произошла ошибка при получении профиля пользователя: {str(e)}")
-        print(e)
+        logger.error(e)
     finally:
         await state.clear()
 

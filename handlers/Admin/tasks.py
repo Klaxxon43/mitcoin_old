@@ -184,5 +184,5 @@ async def on_chat_boost(chat_boost: ChatBoostUpdated, bot: Bot):
     chat_id = chat_boost.chat.id
     user_id = user.id
 
-    print(f"Пользователь {user_id} забустил чат {chat_id}")
+    logger.info(f"Пользователь {user_id} забустил чат {chat_id}")
 

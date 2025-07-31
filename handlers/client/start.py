@@ -83,27 +83,27 @@ async def start_handler(message: types.Message, state: FSMContext, bot: Bot):
 
 async def handle_contest_participation(message: types.Message, bot: Bot, contest_id: int, user_id: int, username: str):
     """Обрабатывает участие в конкурсе из команды /start"""
-    print(f"\n=== START HANDLE PARTICIPATION ===")
-    print(f"contest_id: {contest_id}, user_id: {user_id}, username: {username}")
+    logger.info(f"\n=== START HANDLE PARTICIPATION ===")
+    logger.info(f"contest_id: {contest_id}, user_id: {user_id}, username: {username}")
     import json
     
     try:
         # 1. Получаем данные о конкурсе
-        print("\n[1] Получаем данные конкурса...")
+        logger.info("\n[1] Получаем данные конкурса...")
         contest = await Contest.get_contest(contest_id)
-        print(f"contest data: {contest}")
+        logger.info(f"contest data: {contest}")
         
         if not contest:
-            print("Конкурс не найден!")
+            logger.info("Конкурс не найден!")
             await message.answer("Конкурс не найден", reply_markup=back_menu_kb(user_id))
             return
 
-        print("\n[2] Извлекаем значения конкурса...")
+        logger.info("\n[2] Извлекаем значения конкурса...")
         channel_url = contest[1]  # https://t.me/concest1
-        message_id = contest[-2]  # ID сообщения
-        contest_text = contest[-1]  # Текст сообщения (может быть None)
+        message_id = contest[11]  # ID сообщения
+        contest_text = contest[7]  # Текст сообщения (может быть None)
         channel_username = channel_url.replace("https://t.me/", "").replace("@", "")
-        print(f"Канал: @{channel_username}, ID сообщения: {message_id}")
+        logger.info(f"Канал: @{channel_username}, ID сообщения: {message_id}")
 
         # Создаём contest_data заранее, чтобы использовать в любом случае
         contest_data = {
@@ -119,24 +119,18 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
 
         # Если текст конкурса не получен, попробуем сгенерировать его заново
         if not contest_text:
-            print("\n[2.1] Генерируем текст конкурса...")
+            logger.info("\n[2.1] Генерируем текст конкурса...")
             try:
                 conditions = json.loads(contest[6]) if contest[6] else {}
                 from handlers.Admin.contest import generate_contest_text
                 contest_text = await generate_contest_text(contest_data, conditions)
-                print(f"Сгенерированный текст: {contest_text}")
+                logger.info(f"Сгенерированный текст: {contest_text}")
             except Exception as e:
-                print(f"Ошибка генерации текста конкурса: {e}")
+                logger.info(f"Ошибка генерации текста конкурса: {e}")
                 contest_text = "🎉 Конкурс 🎉\n\nУчастников: 0"
 
         # 3. Проверяем условия участия
-        print("\n[3] Проверяем условия участия...")
-        conditions = {}
-        try:
-            conditions = json.loads(contest[7]) if contest[7] else {}
-        except json.JSONDecodeError as e:
-            print(f"Ошибка парсинга условий: {e}")
-
+        logger.info("\n[3] Проверяем условия участия...")
         conditions_str = contest[6]  # Это строка JSON: '{"auto_conditions": ["is_bot_user", ...], ...}'
 
         # Парсим JSON в словарь
@@ -147,29 +141,29 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
         auto_conditions = conditions.get('auto_conditions', [])
         additional_channels = conditions.get('additional_channels', [])  # Исправлено с 'additional'
         required_refs = conditions.get('required_refs', 0)
-        print(f"Условия: {auto_conditions}")
-        print(f"Доп. каналы: {additional_channels}")
-        print(f"Требуемое количество рефералов: {required_refs}")
+        logger.info(f"Условия: {auto_conditions}")
+        logger.info(f"Доп. каналы: {additional_channels}")
+        logger.info(f"Требуемое количество рефералов: {required_refs}")
 
         # Проверка подписки на основной канал
         if "sub_channel" in auto_conditions:
-            print("\n[3.1] Проверка подписки на основной канал...")
+            logger.info("\n[3.1] Проверка подписки на основной канал...")
             try:
                 chat_member = await bot.get_chat_member(
                     chat_id=f"@{channel_username}", 
                     user_id=user_id
                 )
-                print(f"Статус пользователя: {chat_member.status}")
+                logger.info(f"Статус пользователя: {chat_member.status}")
                 
                 if chat_member.status not in ['member', 'administrator', 'creator']:
-                    print("Пользователь не подписан")
+                    logger.info("Пользователь не подписан")
                     await message.answer(
                         f"Для участия подпишитесь на канал: {channel_url}",
                         reply_markup=back_menu_kb(user_id)
                     )
                     return
             except Exception as e:
-                print(f"Ошибка проверки подписки: {e}")
+                logger.info(f"Ошибка проверки подписки: {e}")
                 await message.answer(
                     "Не удалось проверить подписку на основной канал",
                     reply_markup=back_menu_kb(user_id))
@@ -177,7 +171,7 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
 
         # Проверка подписки на дополнительные каналы
         if additional_channels:
-            print("\n[3.2] Проверка подписки на дополнительные каналы...")
+            logger.info("\n[3.2] Проверка подписки на дополнительные каналы...")
             for channel in additional_channels:
                 channel_username2 = channel.replace("https://t.me/", "").replace("@", "")
                 try:
@@ -185,16 +179,16 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
                         chat_id=f"@{channel_username2}", 
                         user_id=user_id
                     )
-                    print(f"Статус пользователя в {channel_username2}: {chat_member.status}")
+                    logger.info(f"Статус пользователя в {channel_username2}: {chat_member.status}")
                     
                     if chat_member.status not in ['member', 'administrator', 'creator']:
-                        print(f"Пользователь не подписан на {channel}")
+                        logger.info(f"Пользователь не подписан на {channel}")
                         await message.answer(
                             f"Для участия подпишитесь на канал: {channel}",
                             reply_markup=back_menu_kb(user_id))
                         return
                 except Exception as e:
-                    print(f"Ошибка проверки подписки на {channel}: {e}")
+                    logger.info(f"Ошибка проверки подписки на {channel}: {e}")
                     await message.answer(
                         f"Не удалось проверить подписку на канал: {channel}",
                         reply_markup=back_menu_kb(user_id))
@@ -202,13 +196,13 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
 
         # Проверка количества приглашенных рефералов
         if required_refs > 0:
-            print("\n[3.3] Проверка количества рефералов...")
+            logger.info("\n[3.3] Проверка количества рефералов...")
             referred_users = await DB.get_referred_users(user_id)
             current_refs = len(referred_users)
-            print(f"Текущее количество рефералов: {current_refs}")
+            logger.info(f"Текущее количество рефералов: {current_refs}")
             
             if current_refs < required_refs:
-                print(f"Недостаточно рефералов (нужно {required_refs}, есть {current_refs})")
+                logger.info(f"Недостаточно рефералов (нужно {required_refs}, есть {current_refs})")
                 await message.answer(
                     f"Для участия в конкурсе вам нужно пригласить {required_refs} друзей.\n"
                     f"Вы пригласили: {current_refs}",
@@ -225,9 +219,9 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
                 return 
 
         # 4. Добавляем участника
-        print("\n[4] Добавляем участника...")
+        logger.info("\n[4] Добавляем участника...")
         if not await Contest.add_participant(contest_id, user_id, username):
-            print("Пользователь уже участвует")
+            logger.info("Пользователь уже участвует")
             await message.answer(
                 "Вы уже участвуете в этом конкурсе",
                 reply_markup=back_menu_kb(user_id)
@@ -235,22 +229,22 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
             return
 
         # 5. Обновляем счетчик участников
-        print("\n[5] Обновляем счетчик участников...")
+        logger.info("\n[5] Обновляем счетчик участников...")
         participants_count = await Contest.get_participants_count(contest_id)
-        print(f"Текущее количество участников: {participants_count}")
+        logger.info(f"Текущее количество участников: {participants_count}")
         
         # 6. Обновляем текст конкурса
-        print("\n[6] Обновляем текст конкурса...")
+        logger.info("\n[6] Обновляем текст конкурса...")
         # Если текст конкурса пуст, используем минимальный вариант
         if not contest_text:
             contest_text = "🎉 Конкурс 🎉\n\nУчастников: 0"
         
         # Обновляем строку с количеством участников
         updated_text = update_participants_count(contest_text, participants_count)
-        print(f"Обновленный текст:\n{updated_text}")
+        logger.info(f"Обновленный текст:\n{updated_text}")
 
         # 7. Обновляем сообщение в канале
-        print("\n[7] Обновляем сообщение в канале...")
+        logger.info("\n[7] Обновляем сообщение в канале...")
         try:
             if not updated_text.strip():
                 raise ValueError("Текст сообщения пуст после обновления")
@@ -273,7 +267,7 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
                     parse_mode="HTML"
                 )
             except Exception as text_edit_error:
-                print(f"Не удалось отредактировать текст: {text_edit_error}")
+                logger.info(f"Не удалось отредактировать текст: {text_edit_error}")
                 try:
                     # Пытаемся отредактировать подпись (если это сообщение с фото)
                     await bot.edit_message_caption(
@@ -284,7 +278,7 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
                         parse_mode="HTML"
                     )
                 except Exception as caption_edit_error:
-                    print(f"Не удалось отредактировать подпись: {caption_edit_error}")
+                    logger.info(f"Не удалось отредактировать подпись: {caption_edit_error}")
                     try:
                         # Если не получилось редактировать, отправляем новое сообщение
                         if contest_data['image_path'] and os.path.exists(contest_data["image_path"]):
@@ -306,34 +300,34 @@ async def handle_contest_participation(message: types.Message, bot: Bot, contest
                         
                         # Обновляем ID сообщения в базе данных
                         await Contest.update_contest_message_id(contest_id, new_message.message_id)
-                        print("Создано новое сообщение с кнопкой")
+                        logger.info("Создано новое сообщение с кнопкой")
                     except Exception as send_error:
-                        print(f"Не удалось отправить новое сообщение: {send_error}")
+                        logger.info(f"Не удалось отправить новое сообщение: {send_error}")
                         raise Exception("Не удалось обновить сообщение в канале")
 
             await Contest.update_contest_message_text(contest_id, updated_text)
-            print("Сообщение успешно обновлено с кнопкой!")
+            logger.info("Сообщение успешно обновлено с кнопкой!")
         except ValueError as e:
-            print(f"Ошибка валидации: {e}")
+            logger.info(f"Ошибка валидации: {e}")
             await message.answer(
                 "Ошибка: недопустимый текст сообщения",
                 reply_markup=back_menu_kb(user_id))
         except Exception as e:
-            print(f"Неизвестная ошибка при редактировании: {e}")
+            logger.info(f"Неизвестная ошибка при редактировании: {e}")
             await message.answer(
                 "Не удалось обновить конкурс (техническая ошибка)",
                 reply_markup=back_menu_kb(user_id))
             return
 
         # 8. Отправляем подтверждение
-        print("\n[8] Отправляем подтверждение...")
+        logger.info("\n[8] Отправляем подтверждение...")
         await message.answer(
             "🎉 Вы успешно зарегистрировались на конкурс!",
             reply_markup=back_menu_kb(user_id))
-        print("=== УСПЕШНО ЗАВЕРШЕНО ===")
+        logger.info("=== УСПЕШНО ЗАВЕРШЕНО ===")
             
     except Exception as e:
-        print(f"\n!!! ОШИБКА: {e}\n{traceback.format_exc()}")
+        logger.info(f"\n!!! ОШИБКА: {e}\n{traceback.format_exc()}")
         await message.answer(
             "Произошла ошибка при обработке вашего участия",
             reply_markup=back_menu_kb(user_id))
@@ -363,7 +357,7 @@ async def check_channel_subscriptions(user_id: int, bot: Bot) -> list:
             if chat_member.status not in ['member', 'administrator', 'creator']:
                 not_subscribed.append(channel)
         except Exception as e:
-            print(f"Ошибка при проверке подписки: {e} \n\n {channel} \n\n ")
+            logger.info(f"Ошибка при проверке подписки: {e} \n\n {channel} \n\n ")
     
     return not_subscribed
 
@@ -776,7 +770,7 @@ async def handle_channel_task(message: types.Message, bot: Bot, task_id: int):
         )
         
     except Exception as e:
-        print(f"Ошибка при обработке задания канала: {e}")
+        logger.info(f"Ошибка при обработке задания канала: {e}")
         await message.answer(
             "❌ Произошла ошибка при загрузке задания. Попробуйте позже.",
             reply_markup=back_menu_kb(user_id)
@@ -833,7 +827,7 @@ async def handle_chat_task(message: types.Message, bot: Bot, task_id: int):
         )
         
     except Exception as e:
-        print(f"Ошибка при обработке задания чата: {e}")
+        logger.info(f"Ошибка при обработке задания чата: {e}")
         await message.answer(
             "❌ Произошла ошибка при загрузке задания. Попробуйте позже.",
             reply_markup=back_menu_kb(user_id)
@@ -892,7 +886,7 @@ async def handle_comment_task(message: types.Message, bot: Bot, task_id: int):
         )
         
     except Exception as e:
-        print(f"Ошибка при обработке задания комментария: {e}")
+        logger.info(f"Ошибка при обработке задания комментария: {e}")
         await message.answer(
             "❌ Не удалось загрузить пост для комментирования",
             reply_markup=back_menu_kb(user_id)
@@ -955,7 +949,7 @@ async def handle_boost_task(message: types.Message, bot: Bot, task_id: int):
         )
         
     except Exception as e:
-        print(f"Ошибка при обработке задания буста: {e}")
+        logger.info(f"Ошибка при обработке задания буста: {e}")
         await message.answer(
             "❌ Произошла ошибка при загрузке задания. Попробуйте позже.",
             reply_markup=back_menu_kb(user_id)

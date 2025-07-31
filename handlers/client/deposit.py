@@ -371,8 +371,7 @@ async def successful_payment_handler(message: types.Message, bot: Bot):
             if currency == 'MICO':
                 await DB.add_balance(user_id, amount)
             else:
-                rub_amount = amount / 2000 * 20  # Конвертируем MICO обратно в RUB по примерному курсу
-                await DB.add_rub_balance(user_id, float(rub_amount))
+                await DB.add_rub_balance(user_id, float(amount))  # amount уже в рублях
                 
             await DB.add_transaction(
                 user_id=user_id,

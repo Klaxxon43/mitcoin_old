@@ -1,9 +1,6 @@
 {
-    "url": "https://mitcoin.online",
-    "name": "MITcoin",
-    "iconUrl": "https://coral-secret-whale-816.mypinata.cloud/ipfs/bafkreihz363mzq6yq2ql56oghw4mcweyjuedrnhc6v3fifiwb73suejmzu",
-    "termsOfUseUrl": "https://mitcoin.online/terms",
-    "privacyPolicyUrl": "https://mitcoin.online/privacy",
-    "network": "mainnet"
-  }
+  "url": "https://t.me/mitcoin2bot/app",
+  "name": "MitCoin",
+  "iconUrl": "https://mitcoin.online/favicon.png"
+}
   

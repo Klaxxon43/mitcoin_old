@@ -364,11 +364,37 @@ async def conditions_done(callback: types.CallbackQuery, state: FSMContext):
         required_refs=required_refs
     )
     
+    # Создаем клавиатуру для выбора типа текста конкурса
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Автоматически сгенерировать текст", callback_data="generate_contest_text")
+    kb.button(text="Ввести текст вручную", callback_data="enter_contest_text")
+    kb.adjust(1)
+    
     await callback.message.edit_text(
-        "Введите дополнительные условия (или '-' чтобы пропустить):"
+        "Выберите способ создания текста конкурса:",
+        reply_markup=kb.as_markup()
     )
-    await state.set_state(CreateContest.additional_conditions)
 
+@admin.callback_query(F.data == "generate_contest_text")
+async def generate_contest_text_handler(callback: types.CallbackQuery, state: FSMContext):
+    await ask_contest_content(callback.message, state)
+
+@admin.callback_query(F.data == "enter_contest_text")
+async def enter_contest_text_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "Введите текст конкурса (обязательно включите строку с 'Участников: 0'):"
+    )
+    await state.set_state(CreateContest.contest_text_input)
+
+@admin.message(CreateContest.contest_text_input)
+async def process_contest_text_input(message: types.Message, state: FSMContext):
+    # Проверяем, содержит ли текст обязательную строку
+    if "Участников: 0" not in message.text:
+        await message.answer("Текст конкурса должен содержать строку 'Участников: 0'. Пожалуйста, добавьте ее и отправьте текст снова.")
+        return
+    
+    await state.update_data(contest_text=message.text)
+    await ask_contest_content(message, state)
 
 @admin.message(CreateContest.additional_conditions)
 async def process_additional_conditions(message: types.Message, state: FSMContext):
@@ -377,13 +403,20 @@ async def process_additional_conditions(message: types.Message, state: FSMContex
     await ask_contest_content(message, state)
 
 async def ask_contest_content(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    
+    # Если текст уже есть (введен вручную), пропускаем запрос текста
+    if data.get("contest_text"):
+        await confirm_contest(message, state)
+        return
+    
     kb = InlineKeyboardBuilder()
     kb.button(text="Использовать contest.png", callback_data="use_default_image")
     kb.button(text="Пропустить", callback_data="skip_image")
     kb.adjust(1)
     
     await message.answer(
-        "Отправьте текст конкурса и/или изображение:\n"
+        "Отправьте изображение для конкурса (если нужно):\n"
         "Вы можете использовать стандартное изображение или пропустить этот шаг",
         reply_markup=kb.as_markup()
     )
@@ -392,18 +425,12 @@ async def ask_contest_content(message: types.Message, state: FSMContext):
 @admin.callback_query(F.data == "use_default_image", CreateContest.contest_content)
 async def use_default_image(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(image_path="contest.png")
-    await callback.message.edit_text(
-        "Отправьте текст конкурса (или '-' чтобы пропустить):"
-    )
-    await state.set_state(CreateContest.contest_text)
+    await confirm_contest(callback.message, state)
 
 @admin.callback_query(F.data == "skip_image", CreateContest.contest_content)
 async def skip_image(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(image_path=None)
-    await callback.message.edit_text(
-        "Отправьте текст конкурса (или '-' чтобы пропустить):"
-    )
-    await state.set_state(CreateContest.contest_text)
+    await confirm_contest(callback.message, state)
 
 @admin.message(CreateContest.contest_content)
 async def process_contest_content(message: types.Message, state: FSMContext):
@@ -414,20 +441,6 @@ async def process_contest_content(message: types.Message, state: FSMContext):
         image_path = f"contests/{file_id}.jpg"
         await state.update_data(image_path=image_path)
     
-    if message.text and message.text != "-":
-        await state.update_data(contest_text=message.text)
-    
-    data = await state.get_data()
-    if "contest_text" not in data:
-        await message.answer("Отправьте текст конкурса (или '-' чтобы пропустить):")
-        await state.set_state(CreateContest.contest_text)
-    else:
-        await confirm_contest(message, state)
-
-@admin.message(CreateContest.contest_text)
-async def process_contest_text(message: types.Message, state: FSMContext):
-    text = message.text if message.text != "-" else None
-    await state.update_data(contest_text=text)
     await confirm_contest(message, state)
 
 async def confirm_contest(message: types.Message, state: FSMContext):
@@ -440,39 +453,19 @@ async def confirm_contest(message: types.Message, state: FSMContext):
     
     end_date = datetime.strptime(data['end_date'], "%d.%m.%Y %H:%M").strftime("%H:%M, %d.%m.%Y MSK")
     
-    # Формируем текст подтверждения в новом формате
-    text = "🎉 Проверьте данные конкурса 🎉\n\n"
-    text += f"📢 Канал: {data['channel_url']}\n"
-    text += f"🏆 Количество победителей: {data['winners_count']}\n\n"
-    text += "💰 Призы:\n"
+    # Если текст был введен вручную, используем его без изменений
+    if data.get("contest_text"):
+        text = data["contest_text"]
+    else:
+        # Формируем текст автоматически
+        text = await generate_contest_text(data, {
+            "auto_conditions": data.get("conditions", []),
+            "additional_channels": data.get("additional_channels", []),
+            "required_refs": data.get("required_refs", 0),
+            "additional": data.get("additional_conditions", "")
+        })
     
-    # Сортируем призы по местам
-    for place, prize in sorted(data.get("prizes", {}).items(), key=lambda x: int(x[0])):
-        text += f"  {place} место: {prize['amount']} {prize['type']}\n"
-    
-    text += f"\n⏳ Начало: {start_date}\n"
-    text += f"⏰ Окончание: {end_date}\n\n"
-    
-    # Формируем условия участия
-    conditions = data.get("conditions", [])
-    additional_conditions = data.get('additional_conditions', '')
-    
-    if conditions or additional_conditions:
-        text += "📌 Условия участия:\n\n"
-        condition_num = 1
-        
-        if "sub_channel" in conditions:
-            text += f"{condition_num}. ✅ Подписаться на канал ({data['channel_url']})\n"
-            condition_num += 1
-        if "is_bot_user" in conditions:
-            text += f"{condition_num}. 📲 Быть активным пользователем нашего бота\n"
-            condition_num += 1
-        if "is_active_user" in conditions:
-            text += f"{condition_num}. 🔥 Быть активным участником сообщества\n"
-            condition_num += 1
-        if additional_conditions and additional_conditions != '-':
-            text += f"{condition_num}. 📌 {additional_conditions}\n"
-    
+    # Добавляем строку проверки
     text += "\n⚠️ Проверьте все данные перед подтверждением!"
     
     # Создаем клавиатуру
@@ -506,6 +499,13 @@ async def confirm_contest(message: types.Message, state: FSMContext):
             reply_markup=kb.as_markup()
         )
 
+@admin.message(CreateContest.contest_text)
+async def process_contest_text(message: types.Message, state: FSMContext):
+    text = message.text if message.text != "-" else None
+    await state.update_data(contest_text=text)
+    await confirm_contest(message, state)
+
+
 @admin.callback_query(F.data == "confirm_contest")
 async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
@@ -516,7 +516,7 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
             "auto_conditions": data.get("conditions", []),
             "additional": data.get("additional_conditions", ""),
             "additional_channels": data.get("additional_channels", []),
-            "required_refs": data.get("required_refs", 0)  # Добавляем количество рефералов
+            "required_refs": data.get("required_refs", 0)
         }
         
         # Определяем статус конкурса
@@ -526,7 +526,17 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
         else:
             status = "waiting"
         
-        # Формируем данные конкурса
+        # Формируем данные конкурса - используем введенный текст, если он есть
+        contest_text = data.get("contest_text")
+        logger.warning(f"contest_text: {contest_text}")
+        if contest_text is None:
+            contest_text = await generate_contest_text({
+                "channel_url": data["channel_url"],
+                "winners_count": data["winners_count"],
+                "prizes": data["prizes"],
+                "end_date": data["end_date"]
+            }, conditions)
+        
         contest_data = {
             "channel_url": data["channel_url"],
             "winners_count": data["winners_count"],
@@ -534,7 +544,7 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
             "start_date": data.get("start_date", datetime.now().strftime("%d.%m.%Y %H:%M")),
             "end_date": data["end_date"],
             "conditions": json.dumps(conditions, ensure_ascii=False),
-            "contest_text": data.get("contest_text", ""),
+            "contest_text": contest_text,  # Используем подготовленный текст
             "image_path": data.get("image_path"),
             "status": status
         }
@@ -547,7 +557,7 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
             start_date=contest_data["start_date"],
             end_date=contest_data["end_date"],
             conditions=contest_data["conditions"],
-            contest_text=contest_data["contest_text"],
+            contest_text=contest_data["contest_text"],  # Сохраняем именно тот текст, который показали пользователю
             image_path=contest_data["image_path"],
             status=contest_data["status"]
         )
@@ -555,9 +565,6 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
         # Если конкурс активный - публикуем сразу
         if status == "active":
             try:
-                # Формируем текст конкурса
-                contest_text = await generate_contest_text(contest_data, conditions)
-                
                 # Создаем кнопку "Участвовать"
                 bot_username = (await bot.get_me()).username
                 participate_kb = InlineKeyboardBuilder()
@@ -579,7 +586,7 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
                         message = await bot.send_photo(
                             chat_id=f"@{channel_username}",
                             photo=types.BufferedInputFile(photo.read(), filename="contest.jpg"),
-                            caption=contest_text,
+                            caption=contest_data["contest_text"],  # Используем сохраненный текст
                             reply_markup=participate_kb.as_markup(),
                             parse_mode="HTML"
                         )
@@ -587,20 +594,20 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
                     # Отправляем текстовое сообщение
                     message = await bot.send_message(
                         chat_id=f"@{channel_username}",
-                        text=contest_text,
+                        text=contest_data["contest_text"],  # Используем сохраненный текст
                         reply_markup=participate_kb.as_markup(),
                         parse_mode="HTML"
                     )
                 
                 # Сохраняем данные сообщения
                 await Contest.update_contest_message_id(contest_id, message.message_id)
-                await Contest.update_contest_message_text(contest_id, contest_text)
+                await Contest.update_contest_message_text(contest_id, contest_data["contest_text"])
                 
                 await callback.answer("✅ Конкурс успешно создан и опубликован в канале!", show_alert=True)
 
             except Exception as e:
                 error_msg = f"❌ Ошибка при публикации: {str(e)}"
-                print(error_msg)
+                logger.error(error_msg)
                 await callback.answer(error_msg, show_alert=True)
         else:
             await callback.answer(
@@ -611,11 +618,10 @@ async def save_contest(callback: types.CallbackQuery, state: FSMContext, bot: Bo
             
     except Exception as e:
         error_msg = f"❌ Критическая ошибка при создании конкурса: {str(e)}"
-        print(error_msg)
+        logger.error(error_msg)
         await callback.answer(error_msg, show_alert=True)
     finally:
-        await state.clear()
-        
+        await state.clear()      
 
 async def generate_contest_text(contest_data, conditions):
     from datetime import datetime
@@ -677,7 +683,7 @@ async def generate_contest_text(contest_data, conditions):
     if additional_conditions and additional_conditions != '-':
         conditions_text += f"{condition_number}. 📌 {additional_conditions}\n"
 
-    # 4. Формируем финальный текст конкурса
+    # 4. Формируем финальный текст конкурса с обязательной строкой
     return (
         f"🎉 Конкурс для всех участников! 🎉\n\n"
         f"Призы:\n" + "\n".join(prizes_text) + "\n\n"
@@ -692,71 +698,71 @@ async def generate_contest_text(contest_data, conditions):
         f"Дата розыгрыша: {formatted_end_date}"
     )
 
-
 async def check_finished_contests(bot: Bot):
-    """Проверяет и завершает конкурсы с истекшим сроком"""
-    current_time = datetime.now()
-    print(f"Проверка конкурсов в {current_time} (check_finished_contests)")
+    """Проверяет конкурсы с учетом часового пояса"""
+    from datetime import timezone
+    current_time = datetime.now(timezone.utc)
+    logger.info(f"[CONTEST] Текущее время (UTC): {current_time}")
     
-    # Получаем активные конкурсы с истекшим сроком
-    print("Получение активных конкурсов...")
     contests = await Contest.get_active_contests_before(current_time)
-    print(f"Найдено {len(contests)} конкурсов для проверки")
     
     for contest in contests:
-        print(contest['id'])
-        print(f"Обработка конкурса ID: {contest['id']}")
         try:
+            end_date = datetime.strptime(contest['end_date'], "%d.%m.%Y %H:%M")
+            end_date_utc = end_date.replace(tzinfo=timezone.utc)
+            
+            if current_time < end_date_utc:
+                logger.info(f"Конкурс {contest['id']} активен до {end_date_utc}")
+                continue
+                
             await finish_contest(contest['id'], bot)
         except Exception as e:
-            print(f"Ошибка при завершении конкурса {contest['id']} (check_finished_contests): {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Ошибка обработки конкурса {contest['id']}: {e}")
 
 async def finish_contest(contest_id: int, bot: Bot):
     """Завершает конкурс и выбирает победителей"""
-    print(f"Начало завершения конкурса {contest_id} (finish_contest)")
+    logger.info(f"[CONTEST] Начало завершения конкурса {contest_id} (finish_contest)")
     contest = await Contest.get_contest2(contest_id)
     if not contest:
-        print(f"Конкурс {contest_id} не найден")
+        logger.info(f"[CONTEST] Конкурс {contest_id} не найден")
         return
     
     if contest.get('status') == 'finished':
-        print(f"Конкурс {contest_id} уже завершен")
+        logger.info(f"[CONTEST] Конкурс {contest_id} уже завершен")
         return
     
-    print(f"Завершение конкурса {contest_id} (finish_contest)")
+    logger.info(f"[CONTEST] Завершение конкурса {contest_id} (finish_contest)")
     
     # 1. Получаем участников
-    print("Получение участников...")
+    logger.info("[CONTEST] Получение участников...")
     participants = await Contest.get_participants(contest_id)
-    print(f"Найдено {len(participants)} участников")
+    logger.info(f"[CONTEST] Найдено {len(participants)} участников")
     
     if not participants:
-        print("Нет участников, обработка пустого конкурса")
+        logger.info("[CONTEST] Нет участников, обработка пустого конкурса")
         await handle_no_participants(contest, bot)
         return
     
     # 2. Выбираем победителей
-    print("Выбор победителей...")
+    logger.info("[CONTEST] Выбор победителей...")
     winners_count = contest['winners_count']
     winners = select_winners(participants, winners_count)
-    print(f"Выбрано {len(winners)} победителей")
+    logger.info(f"[CONTEST] Выбрано {len(winners)} победителей")
     
     # 3. Награждаем победителей
     winners_info = []
     prizes = json.loads(contest['prizes'])
-    print(f"Призы для конкурса: {prizes}")
+    logger.info(f"[CONTEST] Призы для конкурса: {prizes}")
     
     for place, (user_id, username) in enumerate(winners, start=1):
-        print(f"Обработка победителя {username} (место {place})")
+        logger.info(f"[CONTEST] Обработка победителя {username} (место {place})")
         prize = prizes.get(str(place), {})
         if not prize:
-            print(f"Нет приза для места {place}")
+            logger.info(f"[CONTEST] Нет приза для места {place}")
             continue
             
         # Сохраняем победителя
-        print("Сохранение победителя в БД...")
+        logger.info("[CONTEST] Сохранение победителя в БД...")
         await Contest.add_winner(
             contest_id=contest_id,
             user_id=user_id,
@@ -766,7 +772,7 @@ async def finish_contest(contest_id: int, bot: Bot):
         )
         
         # Начисляем награду
-        print(f"Начисление награды: {prize['type']} {prize['amount']}")
+        logger.info(f"[CONTEST] Начисление награды: {prize['type']} {prize['amount']}")
         await award_winner(user_id, prize['type'], prize['amount'])
         
         # Формируем информацию о победителе
@@ -777,56 +783,60 @@ async def finish_contest(contest_id: int, bot: Bot):
         })
         
         # Уведомляем победителя
-        print("Отправка уведомления победителю...")
+        logger.info("[CONTEST] Отправка уведомления победителю...")
         await notify_winner(bot, user_id, place, prize)
     
     # 4. Обновляем статус конкурса
-    print("Обновление статуса конкурса...")
+    logger.info("[CONTEST] Обновление статуса конкурса...")
     await Contest.update_contest_status(contest_id, 'finished')
     
     # 5. Публикуем результаты
-    print("Публикация результатов...")
+    logger.info("[CONTEST] Публикация результатов...")
     await publish_results(bot, contest, winners_info)
 
 def select_winners(participants: list, winners_count: int) -> list:
     """Выбирает случайных победителей"""
-    print(f"Выбор {winners_count} победителей из {len(participants)} участников")
+    logger.info(f"[CONTEST] Выбор {winners_count} победителей из {len(participants)} участников")
     if winners_count >= len(participants):
-        print("Все участники становятся победителями")
+        logger.info("Все участники становятся победителями")
         return participants
     
     return random.sample(participants, winners_count)
 
 async def award_winner(user_id: int, prize_type: str, amount: float):
     """Начисляет награду победителю"""
-    print(f"Начисление награды пользователю {user_id}: {amount} {prize_type}")
+    logger.info(f"[CONTEST] Начисление награды пользователю {user_id}: {amount} {prize_type}")
     if prize_type == 'MICO':
         await DB.add_balance(user_id, amount)
     elif prize_type == 'RUB':
         await DB.add_rub_balance(user_id, amount)
     elif prize_type == 'MINING':
-        await DB.add_mining(user_id)
+        mining = await DB.search_mining(user_id)
+        if not mining:
+            await DB.add_mining(user_id)
+        else:
+            await DB.add_rub_balance(user_id, 299)
     else:
-        print(f"Неизвестный тип приза: {prize_type}")
+        logger.error(f"Неизвестный тип приза: {prize_type}")
 
 async def notify_winner(bot: Bot, user_id: int, place: int, prize: dict):
     """Отправляет уведомление победителю"""
-    print(f"Попытка уведомить пользователя {user_id} о победе")
+    logger.info(f"[CONTEST] Попытка уведомить пользователя {user_id} о победе")
     try:
         await bot.send_message(
             chat_id=user_id,
             text=f"🎉 Поздравляем! Вы заняли {place} место в конкурсе!\n\n"
                  f"Ваш приз: {prize['amount']} {prize['type']} уже на вашем счету!"
         )
-        print("Уведомление успешно отправлено")
+        logger.info("[CONTEST] Уведомление успешно отправлено")
     except Exception as e:
-        print(f"Не удалось уведомить победителя {user_id}: {e}")
+        logger.error(f"Не удалось уведомить победителя {user_id}: {e}")
         import traceback
         traceback.print_exc()
 
 async def publish_results(bot: Bot, contest: dict, winners: list):
     """Публикует результаты конкурса в канале и выдает награды победителям"""
-    print(f"Публикация результатов конкурса {contest['id']}")
+    logger.info(f"[CONTEST] Публикация результатов конкурса {contest['id']}")
     
     try:
         # Выдача наград победителям
@@ -834,14 +844,14 @@ async def publish_results(bot: Bot, contest: dict, winners: list):
         
         channel_username = contest['channel_url'].replace('https://t.me/', '').replace('@', '')
         message_id = contest['message_id']
-        print(f"Канал для публикации: {channel_username}, message_id: {message_id}")
+        logger.info(f"[CONTEST] Канал для публикации: {channel_username}, message_id: {message_id}")
         
         # Получаем текущий текст сообщения
         try:
             message = str(contest['message_text'])
             original_text = message
         except Exception as e:
-            print(f"Не удалось получить исходное сообщение: {e}")
+            logger.error(f"Не удалось получить исходное сообщение: {e}")
             original_text = None
         
         if original_text:
@@ -862,7 +872,7 @@ async def publish_results(bot: Bot, contest: dict, winners: list):
             winners_section += "\n🎁 Награды выданы победителям!"
             updated_text += winners_section
             
-            print(f"Обновленный текст сообщения:\n{updated_text}")
+            logger.info(f"[CONTEST] Обновленный текст сообщения:\n{updated_text}")
             
             try:
                 await bot.edit_message_text(
@@ -872,7 +882,7 @@ async def publish_results(bot: Bot, contest: dict, winners: list):
                     parse_mode="HTML"
                 )
             except Exception as e:
-                print(f"Не удалось отредактировать текст сообщения (попытка редактирования подписи): {e}")
+                logger.error(f"[CONTEST] Не удалось отредактировать текст сообщения (попытка редактирования подписи): {e}")
                 try:
                     await bot.edit_message_caption(
                         chat_id=f"@{channel_username}",
@@ -881,14 +891,14 @@ async def publish_results(bot: Bot, contest: dict, winners: list):
                         parse_mode="HTML"
                     )
                 except Exception as e:
-                    print(f"Не удалось отредактировать подпись сообщения: {e}")
+                    logger.error(f"[CONTEST] Не удалось отредактировать подпись сообщения: {e}")
                     raise
         else:
-            print("Не удалось получить исходный текст сообщения для редактирования")
+            logger.error("[CONTEST] Не удалось получить исходный текст сообщения для редактирования")
             raise Exception("Original message text not found")
         
     except Exception as e:
-        print(f"Не удалось опубликовать результаты (publish_results): {e}")
+        logger.error(f"[CONTEST] Не удалось опубликовать результаты (publish_results): {e}")
         import traceback
         traceback.print_exc()
         # В случае ошибки публикуем результаты как новое сообщение
@@ -897,7 +907,7 @@ async def publish_results(bot: Bot, contest: dict, winners: list):
 
 async def award_winners(winners: list, prizes: str):
     """Выдает награды победителям конкурса"""
-    print("Начало выдачи наград победителям...")
+    logger.info("[CONTEST] Начало выдачи наград победителям...")
     
     try:
         # Преобразуем строку с призами в словарь
@@ -905,29 +915,28 @@ async def award_winners(winners: list, prizes: str):
             prizes = json.loads(prizes)
             
         for winner in winners:
-            print(winner)
             place = winner['place']
             username = winner['username']
             user_id = str(await DB.get_id_from_username(username)).replace("(", "").replace(")", "").replace(",","")
             
             try:
                 # Определяем тип награды и выдаем соответствующий приз
-                print(f"Призы: {prizes}")
+                logger.info(f"[CONTEST] Призы: {prizes}")
                 
                 # Получаем приз для текущего места (формат: {"1": {"type": "MICO", "amount": 111111.0}})
                 prize_info = prizes.get(str(place))
                 if not prize_info:
-                    print(f"Для места {place} не указан приз!")
+                    logger.error(f"[CONTEST] Для места {place} не указан приз!")
                     continue
                     
                 prize_type = prize_info.get('type')
                 prize_amount = prize_info.get('amount')
                 
                 if not prize_type or not prize_amount:
-                    print(f"Для места {place} не указан тип или количество приза!")
+                    logger.error(f"[CONTEST] Для места {place} не указан тип или количество приза!")
                     continue
                 
-                print(f"Выдача награды пользователю {username}: {prize_amount} {prize_type}")
+                logger.info(f"[CONTEST] Выдача награды пользователю {username}: {prize_amount} {prize_type}")
                 
                 # Приводим prize_amount к float на случай, если он пришел как строка
                 prize_amount = float(prize_amount)
@@ -939,20 +948,20 @@ async def award_winners(winners: list, prizes: str):
                 elif prize_type.upper() == 'RUB':
                     await DB.add_rub_balance(user_id, prize_amount)
                 else:
-                    print(f"Неизвестный тип награды: {prize_type}")
+                    logger.error(f"[CONTEST] Неизвестный тип награды: {prize_type}")
                     
-                print(f"Успешно выдана награда для места {place} пользователю {username}")
+                logger.info(f"[CONTEST] Успешно выдана награда для места {place} пользователю {username}")
                 
             except Exception as e:
-                print(f"Ошибка при выдаче награды пользователю {username} (ID: {user_id}): {e}")
+                logger.error(f"[CONTEST] Ошибка при выдаче награды пользователю {username} (ID: {user_id}): {e}")
                 import traceback
                 traceback.print_exc()
                 continue
                 
     except json.JSONDecodeError:
-        print("Ошибка декодирования JSON призов")
+        logger.error("[CONTEST] Ошибка декодирования JSON призов")
     except Exception as e:
-        print(f"Общая ошибка в award_winners: {e}")
+        logger.error(f"[CONTEST] Общая ошибка в award_winners: {e}")
         import traceback
         traceback.print_exc()
 
@@ -984,29 +993,29 @@ async def publish_results_as_new_message(bot: Bot, contest: dict, winners: list)
             parse_mode="HTML"
         )
     except Exception as e:
-        print(f"Не удалось опубликовать результаты как новое сообщение: {e}")
+        logger.error(f"[CONTEST] Не удалось опубликовать результаты как новое сообщение: {e}")
 
 async def handle_no_participants(contest: dict, bot: Bot):
     """Обрабатывает случай, когда нет участников"""
-    print(f"Обработка конкурса без участников {contest['id']}")
+    logger.info(f"[CONTEST] Обработка конкурса без участников {contest['id']}")
     await Contest.update_contest_status(contest['id'], 'finished')
     channel_username = contest['channel_url'].replace('https://t.me/', '').replace('@', '')
     
     try:
-        print(f"Отправка сообщения об отсутствии участников в канал {channel_username}")
+        logger.info(f"[CONTEST] Отправка сообщения об отсутствии участников в канал {channel_username}")
         await bot.send_message(
             chat_id=f"@{channel_username}",
             text="Конкурс завершен, но не было участников 😢"
         )
     except Exception as e:
-        print(f"Не удалось отправить сообщение о завершении (handle_no_participants): {e}")
+        logger.error(f"[CONTEST] Не удалось отправить сообщение о завершении (handle_no_participants): {e}")
         import traceback
         traceback.print_exc()
 
 # В функции on_startup (при запуске бота)
 async def on_startup(bot: Bot):
     """Запускает фоновые задачи при старте бота"""
-    print("Запуск фоновой задачи проверки конкурсов")
+    logger.info("[CONTEST] Запуск фоновой задачи проверки конкурсов")
     asyncio.create_task(run_contest_checker(bot))
 
 @admin.callback_query(F.data == "cancel_contest")
@@ -1017,40 +1026,40 @@ async def cancel_contest(callback: types.CallbackQuery, state: FSMContext):
 
 async def run_contest_checker(bot: Bot):
     """Запускает периодическую проверку конкурсов"""
-    print("Запуск проверки конкурсов (run_contest_checker)")
+    logger.info("[CONTEST] Запуск проверки конкурсов (run_contest_checker)")
     while True:
         try:
-            print("Начало новой итерации проверки конкурсов")
+            logger.info("[CONTEST] Начало новой итерации проверки конкурсов")
             await check_waiting_contests(bot)  # Сначала проверяем ожидающие конкурсы
             await check_finished_contests(bot)  # Затем проверяем завершенные
         except Exception as e:
-            print(f"Ошибка в проверке конкурсов (run_contest_checker): {e}")
+            logger.error(f"[CONTEST] Ошибка в проверке конкурсов (run_contest_checker): {e}")
             import traceback
             traceback.print_exc()
         await asyncio.sleep(60)  # Проверка каждую минуту
-        print("Ожидание 60 секунд до следующей проверки")
+        logger.info("[CONTEST] Ожидание 60 секунд до следующей проверки")
 
 async def check_waiting_contests(bot: Bot):
     """Проверяет и активирует запланированные конкурсы"""
     current_time = datetime.now()
-    print(f"Проверка запланированных конкурсов в {current_time}")
+    logger.info(f"[CONTEST] Проверка запланированных конкурсов в {current_time}")
     
     # Получаем ожидающие конкурсы, которые должны начаться
     contests = await Contest.get_waiting_contests_before(current_time)
-    print(f"Найдено {len(contests)} ожидающих конкурсов для активации")
+    logger.info(f"[CONTEST] Найдено {len(contests)} ожидающих конкурсов для активации")
     
     for contest in contests:
-        print(f"Активация конкурса ID: {contest['id']}")
+        logger.info(f"[CONTEST] Активация конкурса ID: {contest['id']}")
         try:
             await activate_contest(contest, bot)
         except Exception as e:
-            print(f"Ошибка при активации конкурса {contest['id']}: {e}")
+            logger.error(f"[CONTEST] Ошибка при активации конкурса {contest['id']}: {e}")
             import traceback
             traceback.print_exc()
 
 async def activate_contest(contest: dict, bot: Bot):
     """Активирует запланированный конкурс"""
-    print(f"Активация конкурса {contest['id']}")
+    logger.info(f"[CONTEST] Активация конкурса {contest['id']}")
     
     try:
         # Обновляем статус конкурса
@@ -1065,22 +1074,24 @@ async def activate_contest(contest: dict, bot: Bot):
         additional_channels = conditions.get('additional_channels', [])
         
         # Формируем текст конкурса
-        contest_text = await generate_contest_text({
-            'channel_url': contest['channel_url'],
-            'winners_count': contest['winners_count'],
-            'prizes': json.loads(contest['prizes']),
-            'start_date': contest['start_date'],
-            'end_date': contest['end_date'],
-            'conditions': contest['conditions'],
-            'contest_text': contest['contest_text']
-        }, conditions)
+        # Используем сохранённый текст, если он есть
+        contest_text = contest.get('contest_text')
+        if not contest_text:
+            contest_text = await generate_contest_text({
+                'channel_url': contest['channel_url'],
+                'winners_count': contest['winners_count'],
+                'prizes': json.loads(contest['prizes']),
+                'start_date': contest['start_date'],
+                'end_date': contest['end_date']
+            }, conditions)
+
         
         # Проверяем HTML-разметку
         from aiogram.utils.text_decorations import html_decoration as hd
         try:
             safe_text =(contest_text)
         except Exception as e:
-            print(f"Ошибка при экранировании текста: {e}")
+            logger.error(f"[CONTEST] Ошибка при экранировании текста: {e}")
             safe_text = contest_text  # Используем оригинальный текст, если не удалось экранировать
         
         # Создаем кнопку "Участвовать"
@@ -1130,17 +1141,17 @@ async def activate_contest(contest: dict, bot: Bot):
             await Contest.update_contest_message_id(contest['id'], message.message_id)
             await Contest.update_contest_message_text(contest['id'], contest_text)
             
-            print(f"Конкурс {contest['id']} успешно активирован и опубликован")
+            logger.info(f"[CONTEST] Конкурс {contest['id']} успешно активирован и опубликован")
             
         except Exception as e:
-            print(f"Ошибка при публикации конкурса {contest['id']}: {e}")
+            logger.error(f"[CONTEST] Ошибка при публикации конкурса {contest['id']}: {e}")
             # Возвращаем статус waiting для повторной попытки
             await Contest.update_contest_status(contest['id'], 'waiting')
             raise
             
     except json.JSONDecodeError as e:
-        print(f"Ошибка декодирования JSON для конкурса {contest['id']}: {e}")
+        logger.error(f"[CONTEST] Ошибка декодирования JSON для конкурса {contest['id']}: {e}")
         await Contest.update_contest_status(contest['id'], 'error')
     except Exception as e:
-        print(f"Неизвестная ошибка при активации конкурса {contest['id']}: {e}")
+        logger.error(f"[CONTEST] Неизвестная ошибка при активации конкурса {contest['id']}: {e}")
         await Contest.update_contest_status(contest['id'], 'error') 

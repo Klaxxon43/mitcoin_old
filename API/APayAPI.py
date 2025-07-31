@@ -90,17 +90,17 @@ async def main():
     # Создание счёта
     invoice = await APayAPI.create_invoice(amount=amount_kopecks, order_id=order_id)
     if invoice.get('status'):
-        print(f"✅ Счёт создан: {invoice.get('link')}")
+        logger.info(f"✅ Счёт создан: {invoice.get('link')}")
     else:
-        print(f"❌ Ошибка создания счёта: {invoice.get('error')}")
+        logger.info(f"❌ Ошибка создания счёта: {invoice.get('error')}")
 
     # Ожидание и проверка оплаты
-    print("⏳ Ожидание оплаты...")
+    logger.info("⏳ Ожидание оплаты...")
     status = await APayAPI.check_status(order_id)
     if status.get('status') and status.get('order_status') == 'approve':
-        print("💰 Оплата подтверждена.")
+        logger.info("💰 Оплата подтверждена.")
     else:
-        print(f"❌ Оплата не подтверждена: {status.get('error') or status.get('order_status')}")
+        logger.info(f"❌ Оплата не подтверждена: {status.get('error') or status.get('order_status')}")
 
 
 # if __name__ == '__main__':

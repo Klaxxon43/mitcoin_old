@@ -153,7 +153,7 @@ async def handle_channel_selection(message: types.Message, state: FSMContext, bo
             return
 
     except Exception as e:
-        print("Ошибка при проверке канала:", e)
+        logger.info("Ошибка при проверке канала:", e)
         await message.answer("❌ Ошибка при проверке канала.")
         return
 
@@ -266,7 +266,7 @@ async def check_admin_rights(callback: types.CallbackQuery, state: FSMContext, b
         )
 
     except Exception as e:
-        print("Ошибка в check_admin_rights:", e)
+        logger.info("Ошибка в check_admin_rights:", e)
         await callback.message.edit_text("⚠ Произошла ошибка при повторной проверке. Попробуйте позже.")
 
 
@@ -372,47 +372,41 @@ async def taskss_handler(callback: types.CallbackQuery, bot: Bot):
         # 1. Получаем задания из кэша
         cached_tasks = await RedisTasksManager.get_cached_tasks('channel')
         
-        # Если кэш пуст или произошла ошибка, загружаем из БД
+        # Если кэш пуст или произошла ошибка, загружаем
         if not cached_tasks:
-            success = await RedisTasksManager.refresh_task_cache(bot, 'channel')
-            if not success:
-                await callback.answer("Не удалось загрузить задания. Попробуйте позже.", show_alert=True)
-                return
-            
-            cached_tasks = await RedisTasksManager.get_cached_tasks('channel')
-            if not cached_tasks:
                 await callback.message.edit_text(
                     "На данный момент доступных заданий нет 😢",
                     reply_markup=back_work_menu_kb(user_id)
                 )
                 return
         
-        # 2. Фильтруем задания для текущего пользователя
+        # 2. Фильтруем и перемешиваем задания для текущего пользователя
         available_tasks = []
         for task in cached_tasks:
             try:
-                if (not await DB.is_task_completed(user_id, task['id']) and
-                    not await DB.is_task_failed(user_id, task['id']) and
-                    not await DB.is_task_pending(user_id, task['id'])):
+                if await DB.is_task_available_for_user(user_id, task['id']):
                     available_tasks.append(task)
             except Exception as e:
-                print(f"Error checking task {task.get('id')} for user {user_id}: {e}")
+                logger.info(f"Error checking task {task.get('id')} for user {user_id}: {e}")
                 continue
         
-        # 3. Показываем результат пользователю
+        # 3. Перемешиваем задания в случайном порядке
+        random.shuffle(available_tasks)
+        
+        # 4. Показываем результат пользователю
         if available_tasks:
             try:
                 keyboard = await generate_tasks_keyboard_chanel(available_tasks, bot)
                 await callback.message.edit_text(
                     "📢 <b>Задания на каналы:</b>\n\n"
-                    "🎢 Каналы в списке располагаются по количеству необходимых подписчиков\n\n"
+                    "🎢 Каналы в списке отображаются в случайном порядке\n\n"  # Изменили текст
                     "⚡<i>Запрещено отписываться от канала раньше чем через 7 дней, "
                     "в случае нарушения возможен штраф!</i>\n\n"
                     f"📊 Доступно заданий: {len(available_tasks)}",
                     reply_markup=keyboard
                 )
             except Exception as e:
-                print(f"Error generating keyboard: {e}")
+                logger.info(f"Error generating keyboard: {e}")
                 await callback.message.edit_text(
                     "Произошла ошибка при формировании списка заданий",
                     reply_markup=back_work_menu_kb(user_id)
@@ -424,7 +418,7 @@ async def taskss_handler(callback: types.CallbackQuery, bot: Bot):
                 reply_markup=back_work_menu_kb(user_id))
                 
     except Exception as e:
-        print(f"Critical error in taskss_handler: {e}")
+        logger.info(f"Critical error in taskss_handler: {e}")
         await callback.answer("Произошла ошибка. Попробуйте позже.", show_alert=True)
         await callback.message.edit_text(
             "⚠️ Не удалось загрузить задания. Пожалуйста, попробуйте позже.",
@@ -468,11 +462,11 @@ async def generate_tasks_keyboard_chanel(tasks: list, bot: Bot, timestamp: Optio
                         callback_data=f"chaneltask_{task_id}_{timestamp}"
                     ))
                 except Exception as e:
-                    print(f"Ошибка при получении канала {chat_id}: {e}")
+                    logger.info(f"Ошибка при получении канала {chat_id}: {e}")
                     continue
 
         except Exception as e:
-            print(f"Ошибка обработки задания: {e}")
+            logger.info(f"Ошибка обработки задания: {e}")
             continue
 
     builder.row(
@@ -515,7 +509,7 @@ async def task_detail_handler(callback: types.CallbackQuery, bot: Bot):
         await callback.message.edit_text(task_info, reply_markup=builder.as_markup())
 
     except Exception as e:
-        print(f"Ошибка в task_detail_handler: {e}")
+        logger.info(f"Ошибка в task_detail_handler: {e}")
         
 @tasks.callback_query(F.data.startswith('chanelcheck_'))
 async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
@@ -543,7 +537,7 @@ async def check_subscription_chanel(callback: types.CallbackQuery, bot: Bot):
                 reply_markup=builder.as_markup())
             return
     except Exception as e:
-        print(f"Ошибка при проверке подписки: {e}")
+        logger.info(f"Ошибка при проверке подписки: {e}")
         builder = InlineKeyboardBuilder()
         builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_chanel"))
         builder.add(InlineKeyboardButton(text="Проверить 🔄️", callback_data=f"chanelcheck_{task_id}"))
@@ -600,7 +594,7 @@ async def check_admin_and_get_invite_link_chanel(bot: Bot, target_id: int):
         chat_info = await bot.get_chat(target_id)
         return chat_info.invite_link or f"https://t.me/{chat_info.username}"
     except Exception as e:
-        print(e)
+        logger.info(e)
         return "Ссылка недоступна"
     
 
@@ -632,6 +626,6 @@ async def skip_task_handler(callback: types.CallbackQuery, bot: Bot):
             )
 
     except Exception as e:
-        print(f"Ошибка в skip_task_handler: {e}")
+        logger.info(f"Ошибка в skip_task_handler: {e}")
         await callback.answer("Ошибка при пропуске задания", show_alert=True)
 

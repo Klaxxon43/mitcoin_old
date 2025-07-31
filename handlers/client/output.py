@@ -52,7 +52,7 @@ async def outputusdtmenu(callback: types.CallbackQuery, state: FSMContext):
     usd = int(usd)
     user_usdt = rub_balance/usd
 
-    print(user_usdt)
+    logger.info(user_usdt)
     if user_usdt < 2.5:
         await callback.message.edit_text(f"😢 <b>Недостаточно средств на балансе</b>\n\nНа вашем балансе {round(user_usdt, 3)}$, минимальная сумма <b>должна быть более 2.5$</b>", reply_markup=back_profile_kb())
         return

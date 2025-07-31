@@ -1605,6 +1605,40 @@ class DataBase:
             ''', (user_id, task_id))
             return await cur.fetchone() is not None
         
+
+    async def is_task_available_for_user(self, user_id: int, task_id: int) -> bool:
+        """
+        Проверяет, доступно ли задание для пользователя
+        Возвращает True если задание НЕ выполнено, НЕ провалено, 
+        НЕ находится на проверке и НЕ было пропущено пользователем
+        """
+        async with self.con.cursor() as cur:
+            # Проверяем completed_tasks
+            await cur.execute('SELECT 1 FROM completed_tasks WHERE user_id = ? AND task_id = ?', 
+                            (user_id, task_id))
+            if await cur.fetchone():
+                return False
+                
+            # Проверяем failed_tasks
+            await cur.execute('SELECT 1 FROM failed_tasks WHERE user_id = ? AND task_id = ?', 
+                            (user_id, task_id))
+            if await cur.fetchone():
+                return False
+                
+            # Проверяем pending_reaction_tasks
+            await cur.execute('SELECT 1 FROM pending_reaction_tasks WHERE user_id = ? AND task_id = ?', 
+                            (user_id, task_id))
+            if await cur.fetchone():
+                return False
+                
+            # Проверяем skeep_tasks
+            await cur.execute('SELECT 1 FROM skeep_tasks WHERE user_id = ? AND task_id = ?', 
+                            (user_id, task_id))
+            if await cur.fetchone():
+                return False
+                
+        return True
+
     async def get_user_task_statuses(self, user_id: int) -> set[int]:
         """Возвращает множество task_id, уже завершённых, проваленных или ожидающих"""
         task_ids = set()
@@ -2396,6 +2430,24 @@ class DataBase:
             ''')
         await self.con.commit()
 
+    async def reset_daily_completed_task(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('''
+                UPDATE users
+                SET dayly_completed_task = 0,
+                    last_daily_reset = datetime('now')
+            ''')
+        await self.con.commit() 
+
+    async def reset_weekly_statistics(self):
+        async with self.con.cursor() as cur:
+            await cur.execute('''
+                UPDATE users
+                SET weekly_completed_task = 0,
+                    last_weekly_reset = datetime('now')
+            ''')
+        await self.con.commit()
+
     async def get_task_counts(self, user_id: int) -> tuple[int, int, str, str]:
         """Возвращает текущие значения счетчиков и даты последнего сброса"""
         async with self.con.cursor() as cur:
@@ -2787,19 +2839,31 @@ class Contest:
 
     @classmethod
     async def get_active_contests_before(cls, date: datetime) -> list[dict]:
-        """Получает активные конкурсы с истекшим сроком"""
+        """Получает активные конкурсы с истекшим сроком с учетом часового пояса"""
+        from datetime import timezone
         async with DB.con.cursor() as cur:
             await cur.execute('''
                 SELECT * FROM contests 
-                WHERE status != 'finished' AND end_date <= ?
-            ''', (date.strftime('%d.%m.%Y %H:%M'),))
+                WHERE status = 'active'
+            ''')
             rows = await cur.fetchall()
-            
-            # Получаем названия столбцов
             columns = [desc[0] for desc in cur.description]
             
-            # Преобразуем каждую строку в словарь
-            return [dict(zip(columns, row)) for row in rows]     
+            valid_contests = []
+            for row in rows:
+                contest = dict(zip(columns, row))
+                try:
+                    # Парсим дату с учетом того, что она в локальном времени
+                    end_date = datetime.strptime(contest['end_date'], "%d.%m.%Y %H:%M")
+                    # Конвертируем в UTC для сравнения
+                    end_date_utc = end_date.replace(tzinfo=timezone.utc)
+                    
+                    if date.replace(tzinfo=timezone.utc) >= end_date_utc:
+                        valid_contests.append(contest)
+                except ValueError:
+                    continue
+                    
+            return valid_contests
 
 
     async def get_waiting_contests_before(datetime_now) -> list[dict]:

@@ -122,7 +122,7 @@ def profile_kb():
 
 
 def work_menu_kb(user_id):
-    from handlers.client.client import all_price
+    from utils.Imports import all_price
     ikb = InlineKeyboardBuilder()
     ikb.button(text="🔥 Написать в чат", callback_data="work_chating")
     ikb.button(text="🔗 Шилл", url="https://telegra.ph/SHill-zadaniya-12-02")

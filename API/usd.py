@@ -42,7 +42,7 @@ async def create_invoice(amount: float, user_id: int, purpose='', asset: str = '
             'order_id': order_id  # Return order_id for reference
         }
     except Exception as e:
-        print(f"Error creating invoice: {e}")
+        logger.info(f"Error creating invoice: {e}")
         return None
 
 async def create_check(amount: float, user_id: int, asset: str = 'USDT') -> dict:
@@ -70,7 +70,7 @@ async def create_check(amount: float, user_id: int, asset: str = 'USDT') -> dict
             'asset': check.asset
         }
     except Exception as e:
-        print(f"Error creating check: {e}")
+        logger.info(f"Error creating check: {e}")
         return None
 
 async def check_payment_status(invoice_id: int, order_id: str = None, timeout: int = 180) -> bool:
@@ -99,7 +99,7 @@ async def check_payment_status(invoice_id: int, order_id: str = None, timeout: i
             return True
         return False
     except Exception as e:
-        print(f"Error checking invoice status: {e}")
+        logger.info(f"Error checking invoice status: {e}")
         return False
 
 
@@ -109,17 +109,17 @@ async def main():
     
     invoice = await create_invoice(10.50, user_id, "Test deposit")
     if invoice:
-        print(f"Счет создан: {invoice['url']}")
-        print(f"Order ID: {invoice['order_id']}")
+        logger.info(f"Счет создан: {invoice['url']}")
+        logger.info(f"Order ID: {invoice['order_id']}")
         
         # Проверка оплаты с обновлением БД
         status = await check_payment_status(invoice['id'], invoice['order_id'])
-        print(f"Статус: {status}")
+        logger.info(f"Статус: {status}")
     
     # Создание чека
     check = await create_check(5.25, user_id)
     if check:
-        print(f"Чек создан: {check['check_url']}")
+        logger.info(f"Чек создан: {check['check_url']}")
 
 if __name__ == "__main__":
     asyncio.run(main()) 

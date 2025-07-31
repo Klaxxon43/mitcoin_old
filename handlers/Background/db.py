@@ -14,7 +14,7 @@ async def send_db_to_chat(bot: Bot):
     db_path = Path("data/users.db")
 
     if not db_path.exists():
-        print(f"Файл базы данных {db_path} не найден!")
+        logger.info(f"Файл базы данных {db_path} не найден!")
         return
 
     try:
@@ -40,6 +40,6 @@ async def send_db_to_chat(bot: Bot):
             document=input_file,
             caption=f"Резервная копия базы данных ({timestamp})",
         )
-        print(f"База данных успешно отправлена в {timestamp}")
+        logger.info(f"База данных успешно отправлена в {timestamp}")
     except Exception as e:
-        print(f"Ошибка при отправке базы данных: {e}")
+        logger.info(f"Ошибка при отправке базы данных: {e}")

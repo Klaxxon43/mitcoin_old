@@ -87,7 +87,7 @@ async def mailing_get_msg(message: types.Message, state: FSMContext, bot: Bot):
             dead_users += 1
         except Exception as e:
             dead_users += 1
-            print(f"Ошибка при отправке пользователю {user['user_id']}: {e}")
+            logger.error(f"[MAILING] Ошибка при отправке пользователю {user['user_id']}: {e}")
 
     await state.clear()
     await progress_message.answer(

@@ -1,11 +1,29 @@
-from .client import *
-from .client import router
+# from .client import router, TASK_TYPES
+from handlers.client.client import *
+
+
+def paginate_tasks(tasks, page=1, per_page=5):
+    total_pages = (len(tasks) + per_page - 1) // per_page  # Вычисление общего количества страниц
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    tasks_on_page = tasks[start_idx:end_idx]
+    return tasks_on_page, total_pages
+
+TASK_TYPES = {
+    1: '📢 Канал',
+    2: '👥 Чат',
+    3: '👀 Пост',
+    4: '💬 Комментарии',
+    5: '🔗 Бот',
+    6: '⭐️ Буст',
+    7: '❤️ Реакция'
+}
 
 @router.callback_query(F.data == 'my_works')
 async def taskss_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     tasks = await DB.get_tasks_by_user(user_id)  # Получаем задачи пользователя
-    print(tasks)  # Проверяем данные
+    logger.info(tasks)  # Проверяем данные
 
     # Начинаем с первой страницы
     page = 1
@@ -58,11 +76,11 @@ async def check_admin_and_get_invite_link(bot, target_id):
                     invite_link = chat.invite_link
                     return invite_link
                 except Exception as e:
-                    print(f'Ошибка получения инвайта для {chat_id}, ошибка - {e}')
+                    logger.info(f'Ошибка получения инвайта для {chat_id}, ошибка - {e}')
                     return "😑 Предоставьте боту права администратора, иначе задание выполняться не будет"
         return "😑 Предоставьте боту права администратора, иначе задание выполняться не будет"
     except Exception as e:
-        print(f'Ошибка при проверке прав администратора: {e}')
+        logger.info(f'Ошибка при проверке прав администратора: {e}')
         return "😑 Предоставьте боту права администратора, иначе задание выполняться не будет"
 
 
@@ -397,7 +415,7 @@ async def process_amount_input(message: types.Message, state: FSMContext, bot: B
     except ValueError:
         await message.answer("❌ Пожалуйста, введите корректное число.")
     except Exception as e:
-        print(f"Ошибка в process_amount_input: {e}")
+        logger.info(f"Ошибка в process_amount_input: {e}")
         await message.answer("❌ Произошла ошибка при обновлении задания.")
     finally:
         await state.clear()
@@ -475,7 +493,7 @@ async def generate_tasks_keyboard2(tasks, page, total_pages, bot):
                 chat = await bot.get_chat(target_id)
                 chat_name = chat.title
             except Exception as e:
-                print(f"Ошибка при получении информации о канале: {e}")
+                logger.info(f"Ошибка при получении информации о канале: {e}")
                 chat_name = "Неизвестный"
 
         # Формируем текст кнопки

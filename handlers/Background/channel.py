@@ -16,7 +16,7 @@ async def scheduled_cache_update(bot, DB):
 async def update_task_cache_for_all_users(bot, DB):
     tasks = [cache_all_tasks(bot, DB)]
     await asyncio.gather(*tasks)
-    print("Кэш (каналы) обновлен")
+    logger.info("Кэш (каналы) обновлен")
 
 
 
@@ -50,27 +50,27 @@ async def cache_all_tasks(bot, DB):
         await set_cached_data(cache_key, new_tasks_with_links, ttl=300)
         with cache_lock:
             task_cache['all_tasks'] = new_tasks_with_links
-            print(f"Кэш обновлен. Заданий: {len(new_tasks_with_links)}")
+            logger.info(f"Кэш обновлен. Заданий: {len(new_tasks_with_links)}")
             
     except Exception as e:
-        print(f'Критическая ошибка в cache_all_tasks: {str(e)}')
+        logger.info(f'Критическая ошибка в cache_all_tasks: {str(e)}')
 
 
 
 async def check_subscriptions_periodically(bot: Bot):
     while True:
         await asyncio.sleep(7200)  # Каждые 2 часа
-        print('провожу проверку')
+        logger.info('провожу проверку')
         try:
             active_tasks = await DB.get_active_completed_tasks()
-            print(active_tasks)
+            logger.info(active_tasks)
             for task in active_tasks:
                 user_id, task_id, target_id, task_sum, owner_id, status, rem_days, *_ = task
                 
                 # Проверка подписки
                 try:
                     member = await bot.get_chat_member(target_id, user_id)
-                    print('member: '+ str(member))
+                    logger.info('member: '+ str(member))
                     is_subscribed = member.status in ['member', 'administrator', 'creator']
                 except Exception:
                     is_subscribed = False
@@ -115,7 +115,7 @@ async def check_subscriptions_periodically(bot: Bot):
                             )
                             
                     except Exception as e:
-                        print(f"Ошибка обработки штрафа: {e}")
+                        logger.info(f"Ошибка обработки штрафа: {e}")
 
             # Ежедневное уменьшение rem_days
             if datetime.now().hour == 0 or datetime.now().hour == 1:  # В полночь
@@ -127,4 +127,4 @@ async def check_subscriptions_periodically(bot: Bot):
                 await DB.con.commit()
                 
         except Exception as e:
-            print(f"Ошибка в фоновой задаче: {e}")
+            logger.info(f"Ошибка в фоновой задаче: {e}")

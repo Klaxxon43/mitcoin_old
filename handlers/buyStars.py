@@ -188,5 +188,5 @@ async def convert_rub_to_usd(amount_rub: float) -> float:
         usd_rate = 80.0  # Пример: 1 USD = 80 RUB
         return amount_rub / usd_rate
     except Exception as e:
-        print(f"Ошибка при конвертации: {e}")
+        logger.info(f"Ошибка при конвертации: {e}")
         return 0.0

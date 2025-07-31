@@ -1,49 +1,41 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Telegram Mini App{% endblock %}</title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/profile.css') }}">
+  <meta charset="UTF-8" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
-  {% block css %}{% endblock %}
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  {% block head %}{% endblock %}
 </head>
 <body>
-  <header id="app-header" class="hidden">
-    <div class="header-user">
-      <img id="user-avatar" src="" alt="Аватар" class="avatar">
-      <span id="user-name">Загрузка...</span>
-    </div>
-    <div id="header-ton-connect"></div>
-  </header>
-
+  <div id="dev-mode-banner" class="dev-mode-banner hidden">DEVELOPMENT MODE</div>
+  
   <div id="app-content" class="hidden">
     {% block content %}{% endblock %}
-    <div id="status" class="status"></div>
   </div>
 
   <div id="telegram-only-message" class="telegram-only hidden">
-    <h2>🔒 Требуется Telegram Mini App</h2>
-    <p>Это приложение работает только внутри Telegram.</p>
-    <p>Пожалуйста, откройте эту страницу в Telegram.</p>
+    <h2>🔒 Telegram Mini App Required</h2>
+    <p>This application only works within the Telegram messenger.</p>
+    <p>Please open this page in Telegram to continue.</p>
   </div>
 
-  <footer id="footer-menu" class="footer-menu hidden">
-    <div class="menu-item {% if request.path == '/' %}active{% endif %}" data-route="/">
-      <i class="fas fa-home menu-icon"></i>
-      <span class="menu-label">Главная</span>
+  {% block footer %}
+  <div id="footer-menu" class="footer-menu hidden">
+    <div class="menu-item" data-route="/">
+      <img src="https://cdn-icons-png.flaticon.com/512/263/263115.png" class="menu-icon" alt="Home">
+      <span class="menu-label">Home</span>
     </div>
-    <div class="menu-item {% if request.path == '/profile' %}active{% endif %}" data-route="/profile">
-      <i class="fas fa-user menu-icon"></i>
-      <span class="menu-label">Профиль</span>
+    <div class="menu-item" data-route="/profile">
+      <img src="https://cdn-icons-png.flaticon.com/512/1144/1144760.png" class="menu-icon" alt="Profile">
+      <span class="menu-label">Profile</span>
     </div>
-  </footer>
+  </div>
+  {% endblock %}
 
-  <script src="{{ url_for('static', filename='js/base.js') }}"></script>
-  {% block js %}{% endblock %}
+  {% block scripts %}
+    <script src="{{ url_for('static', filename='js/base.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/notification.js') }}"></script>
+{% endblock %}
 </body>
 </html>

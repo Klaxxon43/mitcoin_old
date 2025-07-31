@@ -13,17 +13,9 @@ task_cache = {
     'cache_expiry': {}
 }
 
-all_price = {
-    "channel": 1500,
-    "chat": 1500,
-    "post": 250,
-    "comment": 750,
-    "reaction": 500,
-    "link": 1500,
-    "boost": 5000
-}
-
 class RedisTasksManager:
+    _lock = asyncio.Lock()
+
     @staticmethod
     async def start_periodic_check(bot: Bot):
         """Запуск периодической проверки заданий"""
@@ -31,8 +23,17 @@ class RedisTasksManager:
             try:
                 await RedisTasksManager.check_all_tasks(bot)
             except Exception as e:
-                print(f"Ошибка в периодической проверке заданий: {e}")
+                logger.info(f"Ошибка в периодической проверке заданий: {e}")
             await asyncio.sleep(1800)  # 30 минут
+    # @staticmethod
+    # async def start_periodic_check(bot: Bot):
+    #     """Однократная проверка заданий"""
+    #     try:
+    #         while True:
+    #             await RedisTasksManager.check_all_tasks(bot)
+    #             asyncio.sleep(60*30)
+    #     except Exception as e:
+    #         logger.info(f"Ошибка в проверке заданий: {e}")
 
     @staticmethod
     async def check_all_tasks(bot: Bot):
@@ -48,11 +49,11 @@ class RedisTasksManager:
     async def check_tasks_of_type(bot: Bot, task_type: str):
         """Проверка заданий конкретного типа с подробным логированием"""
         try:
-            print(f"\nНачинаем проверку заданий типа: {task_type}")
+            logger.info(f"\nНачинаем проверку заданий типа: {task_type}")
             
             # Получаем текущий кэш (если есть)
             old_cache = await RedisTasksManager.get_cached_tasks(task_type) or []
-            print(f"Текущий кэш ({task_type}): {len(old_cache)} заданий")
+            logger.info(f"Текущий кэш ({task_type}): {len(old_cache)} заданий")
             
             # Получаем задания из БД
             task_mapping = {
@@ -66,10 +67,10 @@ class RedisTasksManager:
             }
             
             db_tasks = await task_mapping[task_type]()
-            print(f"Заданий в БД ({task_type}): {len(db_tasks)}")
+            logger.info(f"Заданий в БД ({task_type}): {len(db_tasks)}")
             
             if not db_tasks:
-                print(f"Нет заданий в БД для типа {task_type}, очищаем кэш")
+                logger.info(f"Нет заданий в БД для типа {task_type}, очищаем кэш")
                 await RedisTasksManager.invalidate_cache(task_type)
                 return
 
@@ -79,7 +80,7 @@ class RedisTasksManager:
             for task in db_tasks:
                 try:
                     is_valid = await RedisTasksManager.is_task_valid(bot, task_type, task)
-                    print(f"Задание {task[0]} - {'валидно' if is_valid else 'невалидно'}")
+                    logger.info(f"Задание {task[0]} - {'валидно' if is_valid else 'невалидно'}")
                     
                     if is_valid:
                         task_data = await RedisTasksManager.prepare_task_data(bot, task_type, task)
@@ -88,67 +89,67 @@ class RedisTasksManager:
                     else:
                         invalid_tasks.append(task)
                 except Exception as e:
-                    print(f"Ошибка проверки задания {task[0]}: {e}")
+                    logger.info(f"Ошибка проверки задания {task[0]}: {e}")
                     invalid_tasks.append(task)
 
-            print(f"Найдено валидных заданий: {len(valid_tasks)}, невалидных: {len(invalid_tasks)}")
+            logger.info(f"Найдено валидных заданий: {len(valid_tasks)}, невалидных: {len(invalid_tasks)}")
 
             # Обрабатываем невалидные задания
             for task in invalid_tasks:
                 await RedisTasksManager.handle_invalid_task(task_type, task, bot)
 
             if valid_tasks:
-                print(f"Обновляем кэш для {task_type} с {len(valid_tasks)} заданиями")
+                logger.info(f"Обновляем кэш для {task_type} с {len(valid_tasks)} заданиями")
                 await RedisTasksManager.cache_tasks(task_type, valid_tasks)
             elif not old_cache:
-                print(f"Нет валидных заданий и нет старого кэша, очищаем кэш для {task_type}")
+                logger.info(f"Нет валидных заданий и нет старого кэша, очищаем кэш для {task_type}")
                 await RedisTasksManager.invalidate_cache(task_type)
             else:
-                print(f"Оставляем старый кэш для {task_type} ({len(old_cache)} заданий)")
+                logger.info(f"Оставляем старый кэш для {task_type} ({len(old_cache)} заданий)")
 
         except Exception as e:
-            print(f"Критическая ошибка при проверке заданий типа {task_type}: {e}")
+            logger.info(f"Критическая ошибка при проверке заданий типа {task_type}: {e}")
 
     @staticmethod
     async def is_task_valid(bot: Bot, task_type: str, task: tuple) -> bool:
         """Проверка валидности задания с улучшенной логикой и логами"""
         try:
-            print(f"\n🔍 Начало проверки задания (тип: {task_type})")
+            logger.info(f"\n🔍 Начало проверки задания (тип: {task_type})")
 
             if task_type == 'boost':
                 task_id, user_id, target_id, amount, task_type_db, status, days = task[:7]
             else:
                 task_id, user_id, target_id, amount, task_type_db, status = task[:6]
 
-            print(f"📌 Задание ID: {task_id}, User: {user_id}, Target: {target_id}, Amount: {amount}")
+            logger.info(f"📌 Задание ID: {task_id}, User: {user_id}, Target: {target_id}, Amount: {amount}")
 
             # Общая валидация
             if not all([task_id, user_id, target_id, amount]):
-                print("❌ Не хватает обязательных данных для задания.")
+                logger.info("❌ Не хватает обязательных данных для задания.")
                 return False
 
             # Проверки по типу
             if task_type == 'channel':
-                print("➡ Проверка задания на канал...")
+                logger.info("➡ Проверка задания на канал...")
                 return await RedisTasksManager._check_channel_task(bot, target_id)
             elif task_type == 'chat':
-                print("➡ Проверка задания на чат...")
+                logger.info("➡ Проверка задания на чат...")
                 return await RedisTasksManager._check_chat_task(bot, target_id)
             elif task_type == 'boost':
-                print("➡ Проверка задания на буст...")
+                logger.info("➡ Проверка задания на буст...")
                 return await RedisTasksManager._check_boost_task(bot, target_id)
             elif task_type in ['post', 'reaction']:
-                print("➡ Проверка задания на пост/реакцию...")
+                logger.info("➡ Проверка задания на пост/реакцию...")
                 return await RedisTasksManager._check_post_reaction_task(bot, target_id)
             elif task_type in ['comment', 'link']:
-                print("✅ Минимальная проверка: задание считается валидным.")
+                logger.info("✅ Минимальная проверка: задание считается валидным.")
                 return True
 
-            print("✅ Тип задания не требует дополнительной проверки.")
+            logger.info("✅ Тип задания не требует дополнительной проверки.")
             return True
 
         except Exception as e:
-            print(f"❌ Ошибка при проверке задания: {e}")
+            logger.info(f"❌ Ошибка при проверке задания: {e}")
             return False
 
 
@@ -156,40 +157,68 @@ class RedisTasksManager:
     async def _check_channel_task(bot: Bot, target_id: int) -> bool:
         try:
             chat = await bot.get_chat(target_id)
-            print(f"✅ Канал найден: {chat.title} ({chat.id})")
+            logger.info(f"✅ Канал найден: {chat.title} ({chat.id})")
 
             bot_member = await bot.get_chat_member(chat.id, (await bot.get_me()).id)
-            print(f"ℹ️ Статус бота в канале: {bot_member.status}")
+            logger.info(f"ℹ️ Статус бота в канале: {bot_member.status}")
 
             if bot_member.status == "administrator" and bot_member.can_invite_users:
-                print("✅ Бот админ и может приглашать.")
+                logger.info("✅ Бот админ и может приглашать.")
                 return True
             else:
-                print("❌ Бот не админ или не может приглашать.")
+                logger.info("❌ Бот не админ или не может приглашать.")
                 return False
         except Exception as e:
-            print(f"❌ Ошибка при проверке канала: {e}")
+            logger.info(f"❌ Ошибка при проверке канала: {e}")
             return False
 
 
     @staticmethod
     async def _check_chat_task(bot: Bot, target_id: int) -> bool:
-        return True
-        # try:
-        #     chat = await bot.get_chat(target_id)
-        #     print(f"✅ Чат найден: {chat.title} ({chat.id})")
+        """Проверка валидности чата для задания"""
+        try:
+            # 1. Проверяем, что чат существует и доступен
+            try:
+                chat = await bot.get_chat(target_id)
+                logger.info(f"ℹ️ Найден чат: {chat.title} (ID: {chat.id})")
+            except Exception as e:
+                logger.info(f"❌ Чат {target_id} не найден или недоступен: {e}")
+                return False
 
-        #     try:
-        #         member = await bot.get_chat_member(target_id, (await bot.get_me()).id)
-        #         print(f"✅ Бот является участником чата (статус: {member.status})")
-        #         return True
-        #     except Exception:
-        #         print("❌ Бот не является участником чата.")
-        #         return False
+            # 2. Проверяем, что бот является участником чата
+            try:
+                bot_member = await bot.get_chat_member(chat.id, (await bot.get_me()).id)
+                logger.info(f"ℹ️ Статус бота в чате: {bot_member.status}")
+                
+                if bot_member.status not in ['member', 'administrator', 'creator']:
+                    logger.info("❌ Бот не является участником чата")
+                    return False
+            except Exception as e:
+                logger.info(f"❌ Ошибка проверки членства бота: {e}")
+                return False
 
-        # except Exception as e:
-        #     print(f"❌ Ошибка при проверке чата: {e}")
-        #     return False
+            # 3. Проверяем, что можно получить invite-ссылку
+            try:
+                invite_link = await bot.export_chat_invite_link(chat.id)
+                if not invite_link:
+                    logger.info("❌ Не удалось получить invite-ссылку")
+                    return False
+                
+                logger.info(f"✅ Invite-ссылка: {invite_link}")
+                return True
+            except Exception as e:
+                logger.info(f"❌ Бот не может создать invite-ссылку: {e}")
+                
+                # Проверяем, есть ли публичная ссылка
+                if hasattr(chat, 'invite_link') and chat.invite_link:
+                    logger.info(f"✅ Есть публичная invite-ссылка: {chat.invite_link}")
+                    return True
+                
+                return False
+
+        except Exception as e:
+            logger.info(f"❌ Критическая ошибка при проверке чата: {e}")
+            return False
 
 
     @staticmethod
@@ -197,26 +226,26 @@ class RedisTasksManager:
         return True
         # try:
         #     chat = await bot.get_chat(target_id)
-        #     print(f"✅ Чат/канал для буста найден: {chat.title} ({chat.id})")
+        #     logger.info(f"✅ Чат/канал для буста найден: {chat.title} ({chat.id})")
 
         #     bot_member = await bot.get_chat_member(chat.id, (await bot.get_me()).id)
-        #     print(f"ℹ️ Статус бота: {bot_member.status}, может постить: {bot_member.can_post_messages}")
+        #     logger.info(f"ℹ️ Статус бота: {bot_member.status}, может постить: {bot_member.can_post_messages}")
 
         #     if bot_member.status == "administrator" and bot_member.can_post_messages:
-        #         print("✅ Бот админ и может публиковать сообщения.")
+        #         logger.info("✅ Бот админ и может публиковать сообщения.")
         #         return True
         #     else:
-        #         print("❌ Бот не админ или не может публиковать сообщения.")
+        #         logger.info("❌ Бот не админ или не может публиковать сообщения.")
         #         return False
         # except Exception as e:
-        #     print(f"❌ Ошибка при проверке чата для буста: {e}")
+        #     logger.info(f"❌ Ошибка при проверке чата для буста: {e}")
         #     return False
 
     @staticmethod
     async def _check_post_reaction_task(bot: Bot, target_id: str) -> bool:
         try:
             if ':' not in target_id:
-                print("❌ Некорректный формат target_id, ожидалось 'username:message_id'")
+                logger.info("❌ Некорректный формат target_id, ожидалось 'username:message_id'")
                 return False
 
             chat_part, message_id_str = target_id.split(':')
@@ -230,37 +259,37 @@ class RedisTasksManager:
                 # Иначе это username, добавим @ если нужно
                 chat_id = f"@{chat_part}" if not chat_part.startswith("@") else chat_part
 
-            print(f"📨 Пробуем переслать сообщение из {chat_id}, ID: {message_id}")
+            logger.info(f"📨 Пробуем переслать сообщение из {chat_id}, ID: {message_id}")
 
             try:
                 await bot.forward_message(INFO_ID, chat_id, message_id)
-                print("✅ Сообщение успешно переслано, доступно.")
+                logger.info("✅ Сообщение успешно переслано, доступно.")
                 return True
             except Exception as e:
-                print(f"❌ Не удалось переслать сообщение: {e}")
+                logger.info(f"❌ Не удалось переслать сообщение: {e}")
                 return False
 
         except Exception as e:
-            print(f"❌ Ошибка при проверке поста/реакции: {e}")
+            logger.info(f"❌ Ошибка при проверке поста/реакции: {e}")
             return False
 
 
     @staticmethod
     async def print_cache_status():
         """Вывод подробного статуса кэша"""
-        print("\nТекущий статус кэша:")
+        logger.info("\nТекущий статус кэша:")
         for task_type in ['channel', 'chat', 'post', 'comment', 'link', 'reaction', 'boost']:
             cached_tasks = await RedisTasksManager.get_cached_tasks(task_type) or []
-            print(f"{task_type.upper()}: {len(cached_tasks)} заданий")
+            logger.info(f"{task_type.upper()}: {len(cached_tasks)} заданий")
             
             # Выводим примеры заданий для диагностики
             for i, task in enumerate(cached_tasks[:3]):
-                print(f"  Задание {i+1}: ID={task.get('id')}, target={task.get('target_id')}, amount={task.get('amount')}")
+                logger.info(f"  Задание {i+1}: ID={task.get('id')}, target={task.get('target_id')}, amount={task.get('amount')}")
         
         common_counts = task_cache.get('common_tasks_count', {}).get('data', {})
-        print("\nОбщее количество заданий по типам:")
+        logger.info("\nОбщее количество заданий по типам:")
         for task_type, count in common_counts.items():
-            print(f"{task_type}: {count}")
+            logger.info(f"{task_type}: {count}")
 
     @staticmethod
     async def check_all_tasks(bot: Bot):
@@ -271,59 +300,56 @@ class RedisTasksManager:
             await RedisTasksManager.check_tasks_of_type(bot, task_type)
         
         await RedisTasksManager.update_common_tasks_count(bot)
-        await RedisTasksManager.print_cache_status()  # Добавьте эту строку
-            
+        await RedisTasksManager.logger.info_cache_status()  # Добавьте эту строку
+                
     @staticmethod
     async def prepare_task_data(bot: Bot, task_type: str, task: tuple) -> Optional[Dict[str, Any]]:
-        """Подготовка данных задания для кэша"""
+        """Подготовка данных задания для кэша с учетом типа проверки"""
         try:
             if task_type == 'boost':
                 task_id, user_id, target_id, amount, task_type_db, status, days = task[:7]
+                other = None
+                task_data = {
+                    'id': task_id,
+                    'user_id': user_id,
+                    'target_id': target_id,
+                    'amount': amount,
+                    'type': task_type_db,
+                    'status': status,
+                    'days': days,  # 👈 ВАЖНО: добавляем это
+                    'other': other,
+                    'is_active': True
+                }
+
             else:
                 task_id, user_id, target_id, amount, task_type_db, status = task[:6]
+                other = task[6] if len(task) > 6 else None  # Берем поле other если есть
 
-            task_data = {
-                'id': task_id,
-                'user_id': user_id,
-                'target_id': target_id,
-                'amount': amount,
-                'type': task_type_db,
-                'status': status,
-                'is_active': True
-            }
+                task_data = {
+                    'id': task_id,
+                    'user_id': user_id,
+                    'target_id': target_id,
+                    'amount': amount,
+                    'type': task_type_db,
+                    'status': status,
+                    'other': other,  # Сохраняем поле other
+                    'is_active': True
+                }
 
-            if task_type in ['channel', 'chat', 'boost']:
-                try:
-                    # Преобразуем target_id, если это username без @
-                    if isinstance(target_id, str) and not target_id.startswith("@"):
-                        target_id = f"@{target_id}"
-
-                    print(f"➡ Получаем чат target_id={target_id}")
-                    chat = await bot.get_chat(target_id)
-
-                    task_data.update({
-                        'title': chat.title,
-                        'username': getattr(chat, 'username', None),
-                        'invite_link': getattr(chat, 'invite_link', None)
-                    })
-
-                    if task_type == 'boost':
-                        task_data['days'] = days
-
-                except Exception as e:
-                    print(f"❌ Ошибка получения чата target_id={target_id}: {e}")
-                    return None
-
-            elif task_type == 'reaction':
-                reaction_type = task[6] if len(task) > 6 else None
-                task_data['reaction_type'] = reaction_type
+            # Для link-заданий добавляем информацию о типе проверки
+            if task_type == 'link':
+                if other and str(other).startswith('1|'):
+                    task_data['verification_type'] = 'manual'
+                    task_data['description'] = str(other).split('|')[1] if '|' in str(other) else "Сделайте скриншот"
+                else:
+                    task_data['verification_type'] = 'auto'
 
             return task_data
 
         except Exception as e:
-            print(f"❌ Ошибка подготовки данных задания: {e}")
+            logger.info(f"Ошибка подготовки данных задания: {e}")
             return None
-
+    
 
     @staticmethod
     async def handle_invalid_task(task_type: str, task: tuple, bot: Bot):
@@ -333,11 +359,11 @@ class RedisTasksManager:
             user_id = task[1]
             amount = task[3]
 
-            print(f"⚠️ Удаление невалидного задания #{task_id} (тип: {task_type})")
+            logger.info(f"⚠️ Удаление невалидного задания #{task_id} (тип: {task_type})")
 
             # Удаляем задание из БД
             await DB.delete_task(task_id)
-            print(f"🗑 Задание #{task_id} удалено из базы")
+            logger.info(f"🗑 Задание #{task_id} удалено из базы")
 
             # Возврат средств
             refund_amount = amount * all_price.get(task_type, 0)
@@ -349,7 +375,7 @@ class RedisTasksManager:
                     description=f"Возврат за невалидное задание #{task_id}",
                     additional_info=None
                 )
-                print(f"💰 Возвращено {refund_amount} MITcoin пользователю {user_id}")
+                logger.info(f"💰 Возвращено {refund_amount} MITcoin пользователю {user_id}")
 
                 # Уведомление пользователя
                 try:
@@ -358,12 +384,12 @@ class RedisTasksManager:
                         f"⚠️ Ваше задание #{task_id} (тип: {task_type}) было удалено из-за несоответствия требованиям.\n"
                         f"💸 Средства в размере {refund_amount} MITcoin возвращены на ваш баланс."
                     )
-                    print(f"📩 Пользователь {user_id} уведомлён")
+                    logger.info(f"📩 Пользователь {user_id} уведомлён")
                 except Exception as e:
-                    print(f"❌ Не удалось отправить уведомление пользователю {user_id}: {e}")
+                    logger.info(f"❌ Не удалось отправить уведомление пользователю {user_id}: {e}")
 
         except Exception as e:
-            print(f"❌ Ошибка обработки невалидного задания {task_id}: {e}")
+            logger.info(f"❌ Ошибка обработки невалидного задания {task_id}: {e}")
 
 
     @staticmethod
@@ -373,27 +399,31 @@ class RedisTasksManager:
             # Проверяем наличие данных в кэше и их актуальность
             if task_type in task_cache['tasks']:
                 cached_data = task_cache['tasks'][task_type]
-                if 'expiry' in cached_data and cached_data['expiry'] < asyncio.get_event_loop().time():
-                    del task_cache['tasks'][task_type]  # Удаляем просроченные данные
-                    return None
+                if 'expiry' in cached_data:
+                    expiry = cached_data['expiry']
+                    if expiry is not None and expiry < asyncio.get_event_loop().time():
+                        del task_cache['tasks'][task_type]
+                        return None
+
                 return cached_data.get('data', None)
             return None
         except Exception as e:
-            print(f"Get cached tasks error: {e}")
+            logger.info(f"Get cached tasks error: {e}")
             return None
 
     @staticmethod
     async def cache_tasks(task_type: str, tasks: List[Dict[str, Any]], ttl: int = 1800) -> bool:
         """Сохранить задания в кэш"""
         try:
-            expiry_time = asyncio.get_event_loop().time() + ttl if ttl > 0 else None
+            # expiry_time = asyncio.get_event_loop().time() + ttl if ttl > 0 else None
+            expiry_time = None
             task_cache['tasks'][task_type] = {
                 'data': tasks,
                 'expiry': expiry_time
             }
             return True
         except Exception as e:
-            print(f"Cache tasks error: {e}")
+            logger.info(f"Cache tasks error: {e}")
             return False
 
     @staticmethod
@@ -403,7 +433,7 @@ class RedisTasksManager:
             if task_type in task_cache['tasks']:
                 del task_cache['tasks'][task_type]
         except Exception as e:
-            print(f"Invalidate cache error: {e}")
+            logger.info(f"Invalidate cache error: {e}")
 
     @staticmethod
     async def add_new_task_to_cache(task_type: str, task_data: Dict[str, Any]) -> bool:
@@ -413,7 +443,7 @@ class RedisTasksManager:
             current_tasks.append(task_data)
             return await RedisTasksManager.cache_tasks(task_type, current_tasks)
         except Exception as e:
-            print(f"Error adding new task to cache: {e}")
+            logger.info(f"Error adding new task to cache: {e}")
             return False
 
     async def refresh_task_cache(bot: Bot, task_type: str) -> bool:
@@ -430,7 +460,7 @@ class RedisTasksManager:
             }
 
             if task_type not in task_mapping:
-                print(f"Unknown task type: {task_type}")
+                logger.info(f"Unknown task type: {task_type}")
                 return False
 
             # Получаем текущий кэш (если есть)
@@ -451,7 +481,7 @@ class RedisTasksManager:
                         if task_data:
                             valid_tasks.append(task_data)
                 except Exception as e:
-                    print(f"Error processing task {task[0]}: {e}")
+                    logger.info(f"Error processing task {task[0]}: {e}")
                     continue
 
             if valid_tasks:
@@ -474,7 +504,7 @@ class RedisTasksManager:
             return False
 
         except Exception as e:
-            print(f"Critical error in refresh_task_cache: {e}")
+            logger.info(f"Critical error in refresh_task_cache: {e}")
             return False
 
     @staticmethod
@@ -513,7 +543,7 @@ class RedisTasksManager:
                     else:
                         invalid_tasks.append(task)
                 except Exception as e:
-                    print(f"Ошибка проверки задания {task[0]}: {e}")
+                    logger.info(f"Ошибка проверки задания {task[0]}: {e}")
                     invalid_tasks.append(task)
 
             # Обрабатываем невалидные задания
@@ -534,7 +564,7 @@ class RedisTasksManager:
                 await RedisTasksManager.invalidate_cache(task_type)
 
         except Exception as e:
-            print(f"Ошибка проверки заданий типа {task_type}: {e}")
+            logger.info(f"Ошибка проверки заданий типа {task_type}: {e}")
 
     @staticmethod
     async def update_common_tasks_count(bot: Bot) -> bool:
@@ -557,17 +587,19 @@ class RedisTasksManager:
             # Сохраняем в кэш
             task_cache['common_tasks_count'] = {
                 'data': counts,
-                'expiry': asyncio.get_event_loop().time() + 1800  # TTL 5 минут
+                # 'expiry': asyncio.get_event_loop().time() + 1800  # TTL 5 минут
+                'expiry': None  # Убираем TTL
             }
             return True
         except Exception as e:
-            print(f"Error updating common tasks count: {e}")
+            logger.info(f"Error updating common tasks count: {e}")
             return False
 
 async def set_cached_data(key: str, value: Any, ttl: int = 1800) -> bool:
     """Сохранить данные в кэш"""
     try:
-        expiry_time = asyncio.get_event_loop().time() + ttl if ttl > 0 else None
+        # expiry_time = asyncio.get_event_loop().time() + ttl if ttl > 0 else None
+        expiry_time = None
         if key not in task_cache:
             task_cache[key] = {}
         task_cache[key] = {
@@ -576,5 +608,5 @@ async def set_cached_data(key: str, value: Any, ttl: int = 1800) -> bool:
         }
         return True
     except Exception as e:
-        print(f"Set cached data error: {e}")
+        logger.info(f"Set cached data error: {e}")
         return False

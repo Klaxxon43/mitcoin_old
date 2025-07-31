@@ -130,157 +130,111 @@ async def pr_post4(message: types.Message, state: FSMContext, bot: Bot):
 @tasks.callback_query(F.data == 'work_post')
 async def works_post_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
     user_id = callback.from_user.id
+    await callback.answer()
 
     try:
-        # 1. Получаем задания из кэша или БД
+        # 1. Получаем кэшированные задания
         cached_tasks = await RedisTasksManager.get_cached_tasks('post')
+        
+        # Если кэш пуст, обновляем его
         if not cached_tasks:
-            db_tasks = await DB.select_post_tasks()
-            if db_tasks:
-                await RedisTasksManager.cache_tasks('post', db_tasks)
-                cached_tasks = db_tasks
+                await callback.message.edit_text(
+                    "⛔ Нет доступных заданий на посты",
+                    reply_markup=back_work_menu_kb(user_id)
+                )
+                return
 
-        if not cached_tasks:
-            await callback.message.edit_text(
-                "⛔ Нет доступных заданий на посты",
-                reply_markup=back_work_menu_kb(user_id)
-            )
-            return
-
-        # 2. Фильтруем доступные задания
+        # 2. Фильтруем задания, которые пользователь еще не выполнял
         available_tasks = []
         for task in cached_tasks:
-            try:
-                # Если task в виде tuple (из БД), конвертируем в словарь
-                if isinstance(task, (list, tuple)):
-                    task = {
-                        'id': task[0],
-                        'user_id': task[1],
-                        'target_id': task[2],
-                        'amount': task[3],
-                        'type': task[4],
-                        'status': task[5]
-                    }
-
-                if await DB.is_task_completed(user_id, task['id']):
-                    continue
-
-                task_data = {
-                    'id': task['id'],
-                    'user_id': task['user_id'],
-                    'link': task['target_id'],
-                    'amount': task['amount'],
-                    'type': task['type'],
-                    'status': task['status'],
-                }
-
-                if not task_data['link'] or ':' not in task_data['link']:
-                    print(f"⚠️ Некорректный формат ссылки: {task_data['link']}")
-                    continue
-
-                channel_id, message_id_str = task_data['link'].split(':', 1)
-                message_id = int(message_id_str)
-
-                try:
-                    chat = await bot.get_chat(chat_id=channel_id)
-                    if not chat:
-                        print(f"❌ Канал {channel_id} не найден")
-                        continue
-
-                    try:
-                        member = await bot.get_chat_member(channel_id, bot.id)
-                        if not member.can_post_messages:
-                            print(f"⚠️ Бот не имеет прав в канале {channel_id}")
-                            continue
-                    except:
-                        print(f"⚠️ Бот не состоит в канале {channel_id}")
-                        continue
-
-                    try:
-                        await bot.forward_message(chat_id=INFO_ID, from_chat_id=channel_id, message_id=message_id)
-                        task_data['channel_accessible'] = True
-                        task_data['post_accessible'] = True
-                        available_tasks.append(task_data)
-                    except Exception as e:
-                        print(f"❌ Ошибка проверки поста {message_id}: {str(e)}")
-                        continue
-
-                except Exception as e:
-                    print(f"❌ Ошибка проверки канала {channel_id}: {str(e)}")
-                    continue
-
-            except Exception as e:
-                print(f"⚠️ Ошибка обработки задания: {str(e)}")
-                continue
+            if await DB.is_task_available_for_user(user_id, task['id']):
+                available_tasks.append(task)
 
         if not available_tasks:
             await callback.message.edit_text(
-                "⛔ Нет доступных заданий",
+                "⛔ Вы выполнили все доступные задания",
                 reply_markup=back_work_menu_kb(user_id)
             )
             return
 
-        # 3. Обрабатываем первое доступное задание
+        # 3. Перемешиваем задания в случайном порядке
+        random.shuffle(available_tasks)
+        
+        # 4. Берем первое задание из перемешанного списка
         task = available_tasks[0]
+        channel_id, message_id = map(int, task['target_id'].split(':'))
 
         try:
-            channel_id, message_id_str = task['link'].split(':', 1)
-            message_id = int(message_id_str)
-
+            # 5. Пересылаем пост пользователю
             await bot.forward_message(
                 chat_id=user_id,
                 from_chat_id=channel_id,
                 message_id=message_id
             )
 
+            # 6. Создаем клавиатуру
             keyboard = InlineKeyboardBuilder()
             keyboard.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
             keyboard.add(InlineKeyboardButton(text="Дальше ⏭️", callback_data="work_post"))
             keyboard.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"postreport_{task['id']}"))
 
-            await callback.message.answer_sticker(
-                'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE'
-            )
-            await asyncio.sleep(3)
-
+            # 7. Начисляем награду
             await DB.add_balance(amount=250, user_id=user_id)
             await DB.add_completed_task(
                 user_id=user_id,
                 task_id=task['id'],
-                target_id=message_id,
+                target_id=task['target_id'],
                 task_sum=250,
                 owner_id=task['user_id'],
                 status=0
             )
 
-            await callback.message.answer(
-                "👀 <b>Вы просмотрели пост! +250 MITcoin</b>",
-                reply_markup=keyboard.as_markup()
-            )
+            # 8. Обновляем статистику
+            await DB.increment_statistics(1, 'all_see')
+            await DB.increment_statistics(2, 'all_see')
+            await DB.increment_statistics(1, 'all_taasks')
+            await DB.increment_statistics(2, 'all_taasks')
             await update_dayly_and_weekly_tasks_statics(user_id)
-            await DB.update_task_amount(task['id'], int(task['amount'])-1)
+
+            # 9. Уменьшаем количество оставшихся выполнений
+            await DB.update_task_amount(task['id'], task['amount']-1)
             updated_task = await DB.get_task_by_id(task['id'])
 
+            # 10. Если задание выполнено полностью, удаляем его
             if updated_task[3] == 0:
                 await DB.delete_task(task['id'])
-                await RedisTasksManager.invalidate_cache('post')
+                await RedisTasksManager.refresh_task_cache(bot, "post")
                 await bot.send_message(
                     updated_task[1],
                     "🎉 Ваше задание выполнено!",
                     reply_markup=back_menu_kb(updated_task[1])
                 )
-            await RedisTasksManager.refresh_task_cache(bot, "post")
+
+            # 11. Обновляем общий счетчик заданий
             await RedisTasksManager.update_common_tasks_count(bot)
 
-        except Exception as e:
-            print(f"⚠️ Ошибка обработки поста: {str(e)}")
+            # 12. Отправляем сообщение пользователю
+            await callback.message.answer_sticker(
+                'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE'
+            )
+            await asyncio.sleep(1)
+            
             await callback.message.answer(
-                "⛔ Произошла ошибка при обработке поста",
-                reply_markup=back_work_menu_kb(user_id)
+                "👀 <b>Вы просмотрели пост! +250 MITcoin</b>",
+                reply_markup=keyboard.as_markup()
             )
 
+        except Exception as e:
+            logger.info(f"Ошибка при обработке поста: {str(e)}")
+            # Если не удалось переслать пост, помечаем задание как невалидное
+            await RedisTasksManager.handle_invalid_task('post', task, bot)
+            await RedisTasksManager.refresh_task_cache(bot, "post")
+            
+            # Предлагаем следующее задание
+            await works_post_handler(callback, bot, state)
+
     except Exception as e:
-        print(f"⚠️ Критическая ошибка в обработчике: {str(e)}")
+        logger.info(f"Критическая ошибка в обработчике: {str(e)}")
         await callback.message.edit_text(
             "⛔ Произошла системная ошибка. Попробуйте позже.",
             reply_markup=back_work_menu_kb(user_id)
@@ -361,7 +315,7 @@ async def works_post_handler(callback: types.CallbackQuery, bot: Bot, state: FSM
 #                                        reply_markup=back_menu_kb(user_id))
 
 #         except Exception as e:
-#             print(f"Ошибка: {e}")
+#             logger.info(f"Ошибка: {e}")
 #             await callback.message.edit_text("Произошла ошибка при обработке задания. Попробуйте еще раз.",
 #                                              reply_markup=back_work_menu_kb(user_id))
 #         finally:
@@ -455,7 +409,7 @@ async def works_post_handler(callback: types.CallbackQuery, bot: Bot, state: FSM
 
 #                         return
 #                     except Exception as e:
-#                         print(f"Ошибка: {e}")
+#                         logger.info(f"Ошибка: {e}")
 #                         continue
 
 #                 # Если все задания были пропущены
@@ -497,16 +451,16 @@ async def process_tasks_periodically(bot: Bot):
                     await bot.forward_message(chat_id=INFO_ID, from_chat_id=channel_id, message_id=post_id)
                     new_processed_tasks.append(task)
                 except Exception as e:
-                    print(f"Ошибка при проверке поста {task[2]}: {e}")
+                    logger.info(f"Ошибка при проверке поста {task[2]}: {e}")
                     continue
             from handlers.Background.bg_tasks import post_cache_lock
             with post_cache_lock:
                 global processed_tasks
                 # Сохраняем старые задания, если новые не прошли проверку
                 processed_tasks = new_processed_tasks if new_processed_tasks else processed_tasks
-                print(f"Постовые задания обновлены. Доступно: {len(processed_tasks)}")
+                logger.info(f"Постовые задания обновлены. Доступно: {len(processed_tasks)}")
 
         except Exception as e:
-            print(f"Критическая ошибка в process_tasks_periodically: {e}")
+            logger.info(f"Критическая ошибка в process_tasks_periodically: {e}")
 
         await asyncio.sleep(600)

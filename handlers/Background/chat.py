@@ -17,7 +17,7 @@ async def scheduled_cache_update_chat(bot, DB):
 async def update_task_cache_for_all_users_chat(bot, DB):
     tasks = [get_cached_tasks_chat(bot, DB)]
     await asyncio.gather(*tasks)
-    print("Кэш (чаты) обновлен")
+    logger.info("Кэш (чаты) обновлен")
 
 
 async def get_cached_tasks_chat(bot, DB):
@@ -51,7 +51,7 @@ async def get_cached_tasks_chat(bot, DB):
         if new_tasks:
             await set_cached_data(cache_key, new_tasks, ttl=300)
             task_cache_chat['all_tasks'] = new_tasks
-            print(f"Кэш чатов обновлен. Заданий: {len(new_tasks)}")
+            logger.info(f"Кэш чатов обновлен. Заданий: {len(new_tasks)}")
 
 
 async def check_admin_and_get_invite_link_chat(bot, target_id):
@@ -60,6 +60,6 @@ async def check_admin_and_get_invite_link_chat(bot, target_id):
         invite_link = ChatFullInfo.invite_link
         return invite_link
     except Exception as e:
-        print(e)
+        logger.info(e)
         return False
     

@@ -12,10 +12,8 @@ from handlers.Tasks.reaction import *
 from handlers.Tasks.link import *
 from handlers.Tasks.boost import *
 
-# from handlers.Checks.menu import router
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# from handlers.Checks.menu import router
 
 
 task_cache = {}
@@ -45,7 +43,7 @@ async def profile_handler(callback: types.CallbackQuery, bot: Bot):
     else:
         user_id = callback.from_user.id
         user = await DB.select_user(user_id)
-        print(user)
+        logger.info(user)
         balance = user['balance']
         rub_balance = user['rub_balance']
         if balance is None:
@@ -60,9 +58,9 @@ async def profile_handler(callback: types.CallbackQuery, bot: Bot):
 📅 <b>Дата регистрации </b> <em>{user['reg_time']}</em>                                         
 🪪 <b>ID</b> - <code>{user_id}</code>
 
-💰 Баланс $MICO - {balance:.2f} MitCoin
-💳 Баланс руб - {rub_balance:.2f} ₽
-⭐️ Баланс Stars - {stars}
+💰 <b>Баланс $MICO</b> - <code>{balance:.2f}</code> $MICO
+💳 <b>Баланс руб</b> - <code>{rub_balance:.2f}</code> ₽
+⭐️ <b>Баланс Stars</b> - <code>{stars}</code>
 
 🚀 Выполнено заданий за сегодня: {(await DB.get_task_counts(user_id))[0]}
         ''', reply_markup=profile_kb()) 
@@ -106,73 +104,77 @@ async def stats_menu_handler(callback: types.CallbackQuery, bot: Bot):
     if await DB.get_break_status() and user_id not in ADMINS_ID:
         await callback.message.answer('🛠Идёт технический перерыв🛠\nПопробуйте снова позже')
         return
-    else:
-        user_count = len(await DB.select_all())
-        calculate_total_cost = await DB.calculate_total_cost()
-        statics = await DB.get_statics() 
-        id, chanels, groups, all, see, users, _, gift2, boosts, reactions, links, comments, mined, _, _, _, _, _, _, _, _ = statics[0]
-        id2, chanels2, groups2, all2, see2, users, _, gift, boosts2, reactions2, links2, comments2, mined2, _, _, _, _, _, _, _, _ = statics[1] 
-        balance = await DB.all_balance() 
-        gifts = await DB.count_bonus_time_rows()
-        today_gifts = await DB.count_today_gifts()
-        comment_stats = len(await DB.select_like_comment())
 
-        # Получаем количество заданий
-        task_types = ['channel', 'chat', 'post', 'comment', 'reaction', 'link', 'boost']
-        counts = {key: 0 for key in task_types}
-        
-        for task_type in task_types:
-            cached = await RedisTasksManager.get_cached_tasks(task_type)
-            counts[task_type] = len(cached or [])
+    user_count = len(await DB.select_all())
+    statics = await DB.get_statics() 
+    id, chanels, groups, all, see, users, _, gift2, boosts, reactions, links, comments, mined, *_ = statics[0]
+    id2, chanels2, groups2, all2, see2, users, _, gift, boosts2, reactions2, links2, comments2, mined2, *_ = statics[1] 
+    balance = await DB.all_balance() 
+    gifts = await DB.count_bonus_time_rows()
+    today_gifts = await DB.count_today_gifts()
+    comment_stats = len(await DB.select_like_comment())
 
-        all_tasks = sum(counts.values())
+    # 🔧 Получаем актуальное количество заданий и сумму
+    task_types = ['channel', 'chat', 'post', 'comment', 'reaction', 'link', 'boost']
+    counts = {key: 0 for key in task_types}
+    total_earn = 0.0
 
-        all_minings = await DB.get_mining_line()
+    for task_type in task_types:
+        cached = await RedisTasksManager.get_cached_tasks(task_type)
+        count = len(cached or [])
+        counts[task_type] = count
+        total_earn += count * all_price.get(task_type, 0)
 
-        text = f""" 
-        
-    <b>🌐 Статистика 🌐 </b>
+    all_tasks = sum(counts.values())
+    calculate_total_cost = round(total_earn, 2)
 
-👥 Всего пользователей: {user_count}
-⛏️ пользователей с майнингом: {all_minings} 
+    all_minings = await DB.get_mining_line()
 
-💼 Всего заданий: {all_tasks}
-💸 Возможно заработать: {f"{calculate_total_cost:,}".replace(",", " ")} 
+    text = f""" 
+<b>🌐 Статистика 🌐</b>
 
-🗓<b>Ежедненая статистика</b>: 
-💼 <b>Выполнено заданий всех типов:</b> {all2}
-📣 <b>Подписались на каналы:</b> {chanels2}
-👥 <b>Подписались на группы:</b> {groups2}
-👁️ <b>Просмотров:</b> {see2}
-💬 <b>Комментариев:</b> {comments2}
-🔗 <b>Переходов:</b> {links2}
-🚀 <b>Бустов:</b> {boosts2}
-❤️ <b>Реакций:</b> {reactions2}
-👤 <b>Новых пользователей:</b> {users}
-🎁 <b>Подарков собрано:</b> {gift} раз(а)
-⛏️ <b>Намайнено сегодня:</b> {mined2:.2f}
+👥 Всего пользователей: <code>{user_count}</code>
+⛏️ пользователей с майнингом: <code>{all_minings}</code>
+
+💼 Всего доступных заданий: <code>{all_tasks}</code>
+💸 Возможно заработать: <code>{calculate_total_cost}</code> $MICO
+
+🗓<b>Ежедневная статистика</b>: 
+💼 <b>Выполнено заданий всех типов:</b> <code>{all2}</code>
+📣 <b>Подписались на каналы:</b> <code>{chanels2}</code>
+👥 <b>Подписались на группы:</b> <code>{groups2}</code>
+👁️ <b>Просмотров:</b> <code>{see2}</code>
+💬 <b>Комментариев:</b> <code>{comments2}</code>
+🔗 <b>Переходов:</b> <code>{links2}</code>
+🚀 <b>Бустов:</b> <code>{boosts2}</code>
+❤️ <b>Реакций:</b> <code>{reactions2}</code>
+👤 <b>Новых пользователей:</b> <code>{users}</code>
+🎁 <b>Подарков собрано:</b> <code>{gift}</code> раз(а)
+⛏️ <b>Намайнено сегодня:</b> <code>{mined2:.2f}</code>
 
 🗓<b>Статистика за всё время работы:</b>
-💼 <b>Выполнено заданий всех типов:</b> {all}
-📣 <b>Подписались на каналы:</b> {chanels}
-👥 <b>Подписались на группы:</b> {groups}
-👁️ <b>Общее количество просмотров:</b> {see} 
-💬 <b>Общее количество комментариев:</b> {comments}
-🔗 <b>Общее количество переходов:</b> {links} 
-🚀 <b>Бустов за всё время:</b> {boosts}
-❤️ <b>Реакции за всё время:</b> {reactions}
-💸 <b>Баланс всех пользователей:</b> {f"{balance:,.0f}".replace(",", " ")} $MICO
-🎁 <b>Собрано подарков:</b> {gift2} раз(а)
-⛏️ <b>Намайнено:</b> {f"{mined:.0f}".replace(',', ' ')} $MICO
+💼 <b>Выполнено заданий всех типов:</b> <code>{all}</code>
+📣 <b>Подписались на каналы:</b> <code>{chanels}</code>
+👥 <b>Подписались на группы:</b> <code>{groups}</code>
+👁️ <b>Общее количество просмотров:</b> <code>{see}</code>
+💬 <b>Общее количество комментариев:</b> <code>{comments}</code>
+🔗 <b>Общее количество переходов:</b> <code>{links}</code>
+🚀 <b>Бустов за всё время:</b> <code>{boosts}</code>
+❤️ <b>Реакции за всё время:</b> <code>{reactions}</code>
+💸 <b>Баланс всех пользователей:</b> <code>{f"{balance:,.0f}".replace(",", " ")}</code> $MICO
+🎁 <b>Собрано подарков:</b> <code>{gift2}</code> раз(а)
+⛏️ <b>Намайнено:</b> <code>{f"{mined:.0f}".replace(',', ' ')}</code> $MICO
+"""
 
-    """
-        build = InlineKeyboardBuilder()
-        build.add(InlineKeyboardButton(text='🏆Рейтинг по балансу', callback_data='rating'))
-        build.add(InlineKeyboardButton(text='🏆Рейтинг по рефералам', callback_data='top_referrers'))
-        build.add(InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu'))
-        build.adjust(1)
-        await callback.message.edit_text(text, reply_markup=build.as_markup())
-        await callback.answer()
+    build = InlineKeyboardBuilder()
+    build.add(InlineKeyboardButton(text='🏆Рейтинг по балансу', callback_data='rating'))
+    build.add(InlineKeyboardButton(text='🏆Рейтинг по рефералам', callback_data='top_referrers'))
+    build.add(InlineKeyboardButton(text="🔙 Назад", callback_data='back_menu'))
+    build.adjust(1)
+
+    await callback.message.edit_text(text, reply_markup=build.as_markup())
+    await callback.answer()
+
 
 @router.callback_query(F.data == 'support')
 async def refki_handler(callback: types.CallbackQuery, bot: Bot):
@@ -735,7 +737,7 @@ async def handler_chat_message(message: types.Message, bot: Bot):
                 try:
                     await message.delete()
                 except:
-                    print(f"ошибка удаления сообщения в {chat_id}")
+                    logger.info(f"ошибка удаления сообщения в {chat_id}")
 
                 # Создаем клавиатуру вручную, экранируя текст в URL-канале
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -760,7 +762,7 @@ async def handler_chat_message(message: types.Message, bot: Bot):
 @router.callback_query(F.data.startswith('rating'))
 async def show_top(callback: types.CallbackQuery):
     top_users = await DB.get_top_users(ADMINS_ID)
-    print(top_users)
+    logger.info(top_users)
     
     # Создаем клавиатуру с рейтингом
     keyboard = InlineKeyboardBuilder()
@@ -893,7 +895,7 @@ async def check_subscription(callback_query: types.CallbackQuery, bot: Bot):
             if chat_member.status not in ['member', 'administrator', 'creator']: 
                 not_subscribed.append(channel)
         except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
+            logger.info(f"Ошибка при проверке подписки: {e}")
 
     if not_subscribed:
         # Если пользователь всё ещё не подписан
@@ -915,10 +917,10 @@ async def check_subs_op(user_id, bot: Bot):
             if chat_member.status not in ['member', 'administrator', 'creator']:
                 not_subscribed.append(channel)
         except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}")
+            logger.info(f"Ошибка при проверке подписки: {e}")
 
     if not_subscribed:
-        print(f'https://t.me/{channel[0].replace("@", "")}')
+        logger.info(f'https://t.me/{channel[0].replace("@", "")}')
         # Если пользователь не подписан на некоторые каналы
         keyboard = InlineKeyboardBuilder()
         for channel in not_subscribed:
@@ -951,7 +953,7 @@ async def convertation_handler(callback: types.CallbackQuery, bot: Bot):
 
     # Проверка конвертации
     last_conversion_date = await DB.get_last_conversion_date(user_id)
-    print(last_conversion_date)
+    logger.info(last_conversion_date)
     today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
 
     if last_conversion_date == today:
@@ -980,7 +982,7 @@ async def convertation_rubtomit_handler(callback: types.CallbackQuery, state: FS
     user = await DB.select_user(user_id)
     mit_balance = user['balance']
 
-    print(mit_balance)
+    logger.info(mit_balance)
 
     last_conversion_date = await DB.get_last_conversion_date(user_id) 
     today = datetime.now(MOSCOW_TZ).strftime("%Y-%m-%d")
@@ -1015,7 +1017,7 @@ async def convertation_rubtomit_handler(callback: types.CallbackQuery, state: FS
 async def convertation_rubtomit_input(message: types.Message, state: FSMContext):
     maxprocent = await state.get_data()
     maxprocent = maxprocent['maxprocent']
-    print(f'макс процент {maxprocent}')
+    logger.info(f'макс процент {maxprocent}')
 
     try:
         convert_amount = int(float(message.text))
@@ -1155,7 +1157,7 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 #         await clients[0].send_message(5129878568, message)  # Отправляем сообщение
 #         await clients[0].disconnect()
 #     except Exception as e:
-#         print(f"Ошибка при отправке уведомления: {e}")
+#         logger.info(f"Ошибка при отправке уведомления: {e}")
 
 # # Функция для получения следующей сессии
 # def get_next_client():
@@ -1175,7 +1177,7 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 #     # for _ in range(len(clients)):  # Перебираем все сессии
 #     #     router = get_next_client()
 #     #     try:
-#     #         print(f"Используется сессия: {router.session.filename}")
+#     #         logger.info(f"Используется сессия: {router.session.filename}")
 #     #         await router.start()
 #     #         await router.connect()
 
@@ -1183,7 +1185,7 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 #     #         try:
 #     #             peer = await router.get_entity(chat_id)
 #     #         except Exception as e:
-#     #             print(f"Ошибка при получении информации о чате: {e}")
+#     #             logger.info(f"Ошибка при получении информации о чате: {e}")
 #     #             await router.disconnect()
 #     #             continue
 
@@ -1199,22 +1201,22 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 #     #             min_id=0,
 #     #             hash=0
 #     #         ))
-#     #         print(replies)
+#     #         logger.info(replies)
 
 #     #         # Проверяем, есть ли среди комментариев комментарий от нужного пользователя
 #     #         for message in replies.messages:
 #     #             if message.from_id and message.from_id.user_id == user_id:
-#     #                 print(f"Пользователь {user_id} оставил комментарий!")
+#     #                 logger.info(f"Пользователь {user_id} оставил комментарий!")
 #     #                 await router.disconnect()
 #     #                 return True
 #     #         await router.disconnect()
 #     #     except FloodWaitError as e:
 #     #         # Отправляем уведомление о блокировке
 #     #         await send_notification(f"Сессия {router.session.filename} заблокирована на {e.seconds} секунд.")
-#     #         print(f"FloodWait: нужно подождать {e.seconds} секунд")
+#     #         logger.info(f"FloodWait: нужно подождать {e.seconds} секунд")
 #     #         continue  # Переходим к следующей сессии
 #     #     except Exception as e:
-#     #         print(f"Ошибка при проверке комментария: {e}")
+#     #         logger.info(f"Ошибка при проверке комментария: {e}")
 #     #         continue  # Переходим к следующей сессии
 #     return False
 
@@ -1222,7 +1224,7 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 #     # for _ in range(len(clients)):  # Перебираем все сессии
 #     #     router = get_next_client()
 #     #     try:
-#     #         print(f"Используется сессия: {router.session.filename}")
+#     #         logger.info(f"Используется сессия: {router.session.filename}")
 #     #         await router.start()
 #     #         await router.connect()
 
@@ -1247,7 +1249,7 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 
 #     #         # Проверяем, есть ли у пользователя бусты на канале
 #     #         if hasattr(user_boosts, 'boosts') and len(user_boosts.boosts) > 0:
-#     #             print(f"Пользователь {user_id} сделал буст на канал {channel_username}.")
+#     #             logger.info(f"Пользователь {user_id} сделал буст на канал {channel_username}.")
 #     #             await router.disconnect()
 #     #             return True
 
@@ -1255,10 +1257,10 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 #     #     except FloodWaitError as e:
 #     #         # Отправляем уведомление о блокировке
 #     #         await send_notification(f"Сессия {router.session.filename} заблокирована на {e.seconds} секунд.")
-#     #         print(f"FloodWait: нужно подождать {e.seconds} секунд")
+#     #         logger.info(f"FloodWait: нужно подождать {e.seconds} секунд")
 #     #         continue  # Переходим к следующей сессии
 #     #     except Exception as e:
-#     #         print(f"Ошибка при проверке буста: {e}")
+#     #         logger.info(f"Ошибка при проверке буста: {e}")
 #     #         continue  # Переходим к следующей сессии
 #     return False
 
@@ -1266,25 +1268,25 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 #     # for _ in range(len(clients)):  # Перебираем все сессии
 #     #     router = get_next_client()
 #     #     try:
-#     #         print(f"Используется сессия: {router.session.filename}")
+#     #         logger.info(f"Используется сессия: {router.session.filename}")
 #     #         await router.connect()
 
 #     #         # Получаем информацию о пользователе
 #     #         user = await router.get_entity(user_id)
 #     #         if user.premium:
-#     #             print(f"У пользователя {user.first_name} есть Telegram Premium!")
+#     #             logger.info(f"У пользователя {user.first_name} есть Telegram Premium!")
 #     #             await router.disconnect()
 #     #             return True
 #     #         else:
-#     #             print(f"У пользователя {user.first_name} нет Telegram Premium.")
+#     #             logger.info(f"У пользователя {user.first_name} нет Telegram Premium.")
 #     #             await router.disconnect()
 #     #     except FloodWaitError as e:
 #     #         # Отправляем уведомление о блокировке
 #     #         await send_notification(f"Сессия {router.session.filename} заблокирована на {e.seconds} секунд.")
-#     #         print(f"FloodWait: нужно подождать {e.seconds} секунд")
+#     #         logger.info(f"FloodWait: нужно подождать {e.seconds} секунд")
 #     #         continue  # Переходим к следующей сессии
 #     #     except Exception as e:
-#     #         print(f"Ошибка при проверке премиума: {e}")
+#     #         logger.info(f"Ошибка при проверке премиума: {e}")
 #     #         continue  # Переходим к следующей сессии
 #     return False
 
@@ -1350,7 +1352,7 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 # #                     premium_users_count += 1  # Увеличиваем счетчик премиум-пользователей
 # #                 else:
 # #                     prem = 0
-# #                 print(user_id, prem)
+# #                 logger.info(user_id, prem)
 # #                 count += 1  # Увеличиваем общий счетчик обработанных пользователей
 
 # #                 # Обновляем данные пользователя в базе данных
@@ -1371,7 +1373,7 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 
 # #             except Exception as e:
 # #                 # Логируем ошибку, если что-то пошло не так
-# #                 print(f"Ошибка при проверке пользователя {user_id}: {e}")
+# #                 logger.info(f"Ошибка при проверке пользователя {user_id}: {e}")
 # #                 continue  # Переходим к следующему пользователю
 
 # #         # Отправляем итоговое сообщение
@@ -1382,7 +1384,7 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 # #         )
 # #     except Exception as e:
 # #         # Логируем любые неожиданные ошибки
-# #         print(f"Неожиданная ошибка в update_premium_users: {e}")
+# #         logger.info(f"Неожиданная ошибка в update_premium_users: {e}")
 
 
 
@@ -1392,7 +1394,7 @@ async def convertation_rubtomit_input1(callback: types.CallbackQuery, bot: Bot):
 # data = {"user_id": 5129878568}
 
 # response = requests.post(url, json=data)
-# print(response.json())  
+# logger.info(response.json())  
 
 
 

@@ -1,0 +1,80 @@
+#notification-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 9999;
+    width: 300px;
+    max-width: 90%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .notification {
+    position: relative;
+    padding: 15px;
+    border-radius: 8px;
+    color: white;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    transform: translateX(120%);
+    transition: transform 0.3s ease-out;
+    cursor: pointer;
+    user-select: none;
+  }
+  
+  .notification.show {
+    transform: translateX(0);
+  }
+  
+  .notification.hide {
+    transform: translateX(120%);
+  }
+  
+  .notification.success {
+    background-color: #4CAF50;
+  }
+  
+  .notification.error {
+    background-color: #F44336;
+  }
+  
+  .notification.warning {
+    background-color: #FF9800;
+  }
+  
+  .notification-content {
+    margin-bottom: 10px;
+  }
+  
+  .notification-progress {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 4px;
+    background-color: rgba(255, 255, 255, 0.5);
+    width: 100%;
+    transform-origin: left;
+    transform: scaleX(1);
+  }
+  
+  @keyframes progress {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
+  }
+  
+  .notification-progress.active {
+    animation: progress 3s linear forwards;
+  }
+  
+  /* Для мобильных устройств */
+  @media (max-width: 480px) {
+    #notification-container {
+      width: 90%;
+      right: 5%;
+    }
+    
+    .notification {
+      padding: 12px;
+    }
+  }

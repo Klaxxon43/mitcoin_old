@@ -2,9 +2,7 @@ from utils.Imports import *
 from .redis_task_manager import *
 from .states import *
 
-task_cache = {}
 task_cache_chat = {}
-
 
 
 task_creation_lock = asyncio.Lock()
@@ -12,19 +10,6 @@ reaction_task_lock = asyncio.Lock()
 available_reaction_tasks = [] # REACTIONS 
 
 tasks = Router()
-
-
-all_price = {
-    "channel": 1500,
-    "chat": 1500,
-    "post": 250,
-    "comment": 750,
-    "reaction": 500,
-    "link": 1500,
-    "boost": 5000
-}
-
-
 
 @tasks.callback_query(F.data == 'pr_menu')
 async def pr_menu_handler(callback: types.CallbackQuery, bot: Bot):
@@ -41,10 +26,10 @@ async def pr_menu_handler(callback: types.CallbackQuery, bot: Bot):
             if chat_member.status not in ['member', 'administrator', 'creator']:
                 not_subscribed.append(channel)
         except Exception as e:
-            print(f"Ошибка при проверке подписки: {e}") 
+            logger.info(f"Ошибка при проверке подписки: {e}") 
 
     if not_subscribed:
-        print(f'https://t.me/{channel[0].replace("@", "")}')
+        logger.info(f'https://t.me/{channel[0].replace("@", "")}')
         # Если пользователь не подписан на некоторые каналы
         keyboard = InlineKeyboardBuilder()
         for channel in not_subscribed:
@@ -167,9 +152,9 @@ async def update_dayly_and_weekly_tasks_statics(user_id: int):
         await DB.increment_weekly_completed_task_count(user_id)
         
         # Логируем успешное обновление
-        print(f"Статистика задач обновлена для пользователя {user_id}")
+        logger.info(f"Статистика задач обновлена для пользователя {user_id}")
         return True
     except Exception as e:
-        print(f"Ошибка при обновлении статистики задач: {e}")
+        logger.info(f"Ошибка при обновлении статистики задач: {e}")
         return False
 

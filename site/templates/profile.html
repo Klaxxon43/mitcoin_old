@@ -1,24 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Профиль пользователя{% endblock %}
 
-{% block css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/profile.css') }}">
+{% block title %}Telegram Mini App - Profile{% endblock %}
+
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/notification.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/profile.css') }}">
+  <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-<div class="profile-card">
-    <h2>Профиль</h2>
-    <div id="user-data">Загрузка...</div>
+  <div class="content">
+    <div class="profile-card">
+      <h2 style="margin-top: 0;">👤 User Profile</h2>
+      <div id="user-data">Loading user data...</div>
+    </div>
+
+    <div class="balance-card">
+      <h2 style="margin-top: 0;">💰 Your Balance</h2>
+      <div id="balance" class="balance-amount">...</div>
+    </div>
+
+    <div class="ton-wallet-card">
+      <h2 style="margin-top: 0;">🔐 TON Wallet</h2>
+      <div id="connect-btn"></div>
+      <div id="wallet-info">
+        <p><strong>TON Balance:</strong> <span id="ton-balance" class="ton-balance">–</span></p>
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
   </div>
-  
-  <div class="balance-card">
-    <div>Баланс:</div>
-    <div id="balance" class="balance-amount">0 ₽</div>
-    <button class="btn-primary">Пополнить</button>
-  </div>
-  
 {% endblock %}
 
-{% block js %}
-<script src="{{ url_for('static', filename='js/profile.js') }}"></script>
-{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/profile.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/notification.js') }}"></script>
+{% endblock %} 

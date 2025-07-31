@@ -139,379 +139,480 @@ async def like_post4(message: types.Message, state: FSMContext, bot: Bot):
 
 
 
+# @tasks.callback_query(F.data == 'work_comment')
+# async def works_like_handler(callback: types.CallbackQuery, bot: Bot):
+#     user_id = callback.from_user.id
+    
+#     try:
+#         # Получаем задания из Redis или БД
+#         all_tasks = await RedisTasksManager.get_cached_tasks('comment') or []
+#         logger.info(all_tasks)
+#         if not all_tasks:
+#             await RedisTasksManager.refresh_task_cache(bot, 'chat')
+#             all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
+
+#         if all_tasks:
+#             available_tasks = [
+#                 task for task in all_tasks
+#                 if not await DB.is_task_completed(user_id, task['id'])
+#                 and not await DB.is_task_failed(user_id, task['id'])
+#                 and not await DB.is_task_pending(user_id, task['id'])
+#             ]
+            
+#             if not available_tasks:
+#                 await callback.message.edit_text(
+#                     "На данный момент доступных заданий на комментарии нет, возвращайся позже 😉",
+#                     reply_markup=back_work_menu_kb(user_id)
+#                 )
+#                 return 
+            
+#             random_task = random.choice(available_tasks)
+#             task_id, target_id, amount = random_task['id'], random_task['target_id'], random_task['amount']
+#             chat_id, message_id = map(int, target_id.split(":"))
+            
+#             try:
+#                 await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
+#                 await callback.message.answer_sticker(
+#                     'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
+#                 await asyncio.sleep(3)
+
+#                 builder = InlineKeyboardBuilder()
+#                 builder.add(InlineKeyboardButton(text="Проверить ✅", callback_data=f"comment_{task_id}"))
+#                 builder.add(InlineKeyboardButton(text="✋Ручная проверка", callback_data=f"2comment_{task_id}"))
+#                 builder.add(InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}"))
+#                 builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_comment_{task_id}"))
+#                 builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
+#                 builder.adjust(2, 2, 1)
+
+#                 await callback.message.answer(
+#                     "💬 Напишите комментарий под постом и нажмите кнопку <b>Проверить</b>...",
+#                     reply_markup=builder.as_markup()
+#                 )
+#             except Exception as e:
+#                 logger.info(f"Ошибка: {e}")
+#                 await callback.message.edit_text(
+#                     "Произошла ошибка при обработке задания. Попробуйте позже.",
+#                     reply_markup=back_work_menu_kb(user_id)
+#                 )
+#         else:
+#             await callback.message.edit_text(
+#                 "На данный момент заданий на комментарии нет, возвращайся позже 😉",
+#                 reply_markup=back_work_menu_kb(user_id)
+#             )
+#     except Exception as e:
+#         logger.info(f"Ошибка в works_like_handler: {e}")
+#         await callback.message.edit_text(
+#             "Произошла ошибка. Попробуйте позже.",
+#             reply_markup=back_work_menu_kb(user_id)
+#         )
+
+# @tasks.callback_query(F.data.startswith('comment_'))
+# async def check_like_handler(callback: types.CallbackQuery, bot: Bot):
+#     user_id = callback.from_user.id
+#     task_id = int(callback.data.split('_')[-1])  # Извлекаем ID задания из callback_data
+
+#     # Получаем данные задания
+#     task = await DB.get_task_by_id(task_id)
+#     if not task:
+#         await callback.answer("Задание не найдено.")
+#         return
+
+#     target_id = task[2]
+#     chat_id, message_id = map(int, target_id.split(":"))
+
+#     # Проверяем, поставил ли пользователь лайк
+#     like_detected = None #await comment(user_id, chat_id, message_id)
+
+#     if like_detected:
+#         # # Лайк обнаружен
+#         await DB.increment_statistics(1, 'comments')
+#         await DB.increment_statistics(2, 'comments')
+#         await DB.increment_statistics(1, 'all_taasks')
+#         await DB.increment_statistics(2, 'all_taasks')
+
+#         await callback.message.answer(
+#             f"👍 <b>Комментарий засчитан! +{all_price["comment"]} MITcoin</b>\n\nНажмите кнопку для перехода к следующему заданию.",
+#             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+#                 [InlineKeyboardButton(text="Дальше ⏭️", callback_data="work_comment")]]
+#             )
+#         ) 
+
+#         await update_dayly_and_weekly_tasks_statics(user_id)
+#         await DB.increment_statistics(1, 'comments')
+#         await DB.increment_statistics(2, 'commentss')
+#         await DB.increment_statistics(1, 'all_taasks')
+#         await DB.increment_statistics(2, 'all_taasks')
+
+#         await DB.update_task_amount(task_id)
+#         updated_task = await DB.get_task_by_id(task_id)
+#         await DB.add_completed_task(user_id, task_id, target_id, all_price["comment"], task[1], status=0)
+#         await DB.add_balance(amount=all_price["comment"], user_id=user_id)
+
+#         if updated_task[3] == 0:
+#             delete_task = await DB.get_task_by_id(task_id)
+#             creator_id = delete_task[1]
+#             await DB.delete_task(task_id)
+#             await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на комментарий было успешно выполнено!",
+#                                    reply_markup=back_menu_kb(user_id))
+            
+#             await RedisTasksManager.refresh_task_cache(bot, "comment")
+#     else:
+#         # Лайк не обнаружен
+#         await callback.answer("❌ Комментарий не был написан. Попробуйте ещё раз.", show_alert=True)
+
+# # Обработчик нажатия на кнопку "2comment_"
+# @tasks.callback_query(F.data.startswith('2comment_'))
+# async def _(callback: types.CallbackQuery, state: FSMContext):
+#     user_id = callback.from_user.id
+#     task_id = int(callback.data.split('_')[-1])  # Извлекаем ID задания из callback_data
+
+#     # Получаем данные задания
+#     task = await DB.get_task_by_id(task_id)
+#     if not task:
+#         await callback.answer("Задание не найдено.")
+#         return
+
+#     target_id = task[2]
+#     chat_id, message_id = map(int, target_id.split(":"))
+#     await callback.message.answer(
+#         '😞 Не получилось проверить комментарий автоматически?\n'
+#         '✌️ Нам жаль, что вы столкнулись с этой проблемой, а пока мы решаем её, вы можете попробовать ручную проверку.\n\n'
+#         '❗️ Чтобы сделать это, отправьте сюда скриншот того, как вы выполнили задание. Мы заметим это и в скором времени начислим вам награду!'
+#     )
+#     await state.set_state(CommentProof.waiting_for_screenshot)
+#     await state.update_data(task_id=task_id, target_id=target_id, chat_id=chat_id, message_id=message_id)
+
+# # Обработчик скриншота
+# @tasks.message(CommentProof.waiting_for_screenshot)
+# async def handle_screenshot(message: types.Message, state: FSMContext, bot: Bot):
+#     user_id = message.from_user.id
+#     data = await state.get_data()
+#     task_id = data.get('task_id')
+#     target_id = data.get('target_id')
+#     chat_id = data.get('chat_id')
+#     message_id = data.get('message_id')
+
+#     if not message.photo:
+#         await message.answer("❌ Пожалуйста, отправьте скриншот.")
+#         return
+
+#     screenshot_id = message.photo[-1].file_id  # Берём самое большое изображение
+
+#     # Добавляем задание в таблицу ожидания подтверждения
+#     await DB.add_pending_reaction_task( 
+#         user_id=user_id,
+#         task_id=task_id,
+#         target_id=target_id,
+#         post_id=chat_id,
+#         reaction=message_id,
+#         screenshot=screenshot_id
+#     )
+
+#     # Уведомляем пользователя
+#     kb = InlineKeyboardBuilder()
+#     kb.button(text='⏭ Далее', callback_data='work_comment')
+#     kb.button(text='🔙 Назад', callback_data='work_menu')
+#     await message.answer("✅ Скриншот отправлен на проверку. Ожидайте подтверждения.", reply_markup=kb.as_markup())
+
+#     chat: Chat = await bot.get_chat(chat_id)
+
+#     # Отправляем админу задание на проверку
+#     builder = InlineKeyboardBuilder()
+#     builder.add(InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm_comment_{task_id}_{user_id}"))
+#     builder.add(InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_comment_{task_id}_{user_id}"))
+#     builder.add(InlineKeyboardButton(text="🔗 Перейти к посту", url=f"https://t.me/{chat.username}/{message_id}"))
+#     builder.adjust(1)
+
+#     sent_message = await bot.send_photo(
+#         CHECK_CHAT_ID,
+#         photo=screenshot_id,
+#         caption=(
+#             f"#комментарий\n"
+#             f"📝 <b>Задание на комментарий</b>\n\n"
+#             f"👤 Пользователь: @{message.from_user.username} (ID: {user_id})\n"
+#             f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
+#             f"🆔 ID задания: {task_id}\n\n"
+#             f"Проверьте выполнение задания:"
+#         ),
+#         reply_markup=builder.as_markup()
+#     )
+
+#     # Сохраняем ID сообщения в state
+#     await state.update_data(admin_message_id=sent_message.message_id)
+
+#     # Запускаем фоновую задачу для автоматического подтверждения через 24 часа
+#     asyncio.create_task(auto_confirm_comment_task(task_id, user_id, bot, message.from_user.username, state))
+
+#     await state.clear()
+
+# # Функция для автоматического подтверждения через 24 часа
+# async def auto_confirm_comment_task(task_id, user_id, bot, username, state):
+#     await asyncio.sleep(24 * 3600)  # Ждем 24 часа
+#     pending_task = await DB.get_pending_reaction_task(task_id, user_id)
+#     if pending_task:
+#         await confirm_comment_handler(task_id, user_id, bot, username, state)
+
+# # Обработчик подтверждения задания админом
+# @tasks.callback_query(F.data.startswith('confirm_comment_'))
+# async def confirm_comment_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
+#     parts = callback.data.split('_')
+#     if len(parts) < 3:
+#         await callback.answer("Некорректный формат callback данных.")
+#         return
+
+#     task_id = int(parts[-2])  # Предпоследний элемент — task_id
+#     user_id = int(parts[-1])  # Последний элемент — user_id
+
+#     # Получаем задание из таблицы ожидания
+#     pending_task = await DB.get_pending_reaction_task(task_id, user_id)
+#     if not pending_task:
+#         await callback.answer("Задание не найдено.")
+#         return
+
+#     # Извлекаем данные из кортежа по индексам
+#     pending_id, user_id, task_id, target_id, chat_id, message_id, screenshot, status = pending_task
+
+#     # Добавляем задание в таблицу completed_tasks
+#     await DB.add_completed_task(
+#         user_id=user_id,
+#         task_id=task_id,
+#         target_id=target_id,
+#         task_sum=all_price["comment"],
+#         owner_id=user_id,
+#         status=0,
+#         other=0
+#     )
+
+#     # Удаляем задание из таблицы ожидания
+#     await DB.delete_pending_reaction_task(task_id, user_id)
+
+#     # Начисляем баланс пользователю
+#     await DB.add_balance(amount=all_price["comment"], user_id=user_id)
+
+#     task = await DB.get_task_by_id(task_id)
+#     if task:
+#         new_amount = task[3] - 1  # task[3] — это текущее количество выполнений
+#         await DB.update_task_amount2(task_id, new_amount)
+
+#     chat: Chat = await bot.get_chat(chat_id)
+
+#     # Уведомляем пользователя
+#     await bot.send_message(
+#         user_id,
+#         f"🎉 <b>Ваше задание на комментарий подтверждено!</b>\n\n"
+#         f"💸 Вам начислено: {all_price["comment"]} MITcoin\n"
+#         f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
+#         f"🆔 ID задания: {task_id}"
+#     )
+
+#     await DB.increment_statistics(1, 'comments')
+#     await DB.increment_statistics(2, 'commentss')
+#     await DB.increment_statistics(1, 'all_taasks')
+#     await DB.increment_statistics(2, 'all_taasks')
+
+#     await update_dayly_and_weekly_tasks_statics(user_id)
+
+#     # Уведомляем создателя задания
+#     creator_id = user_id
+#     # await bot.send_message(
+#     #     creator_id,
+#     #     f"🎉 <b>Ваше задание на комментарий выполнено!</b>\n\n"
+#     #     f"👤 Пользователь: @{callback.from_user.username} (ID: {user_id})\n" 
+#     #     f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
+#     #     f"🆔 ID задания: {task_id}"
+#     # )
+
+#     # Удаляем сообщение с заданием
+#     data = await state.get_data()
+#     admin_message_id = data.get('admin_message_id')
+#     if admin_message_id:
+#         await bot.delete_message(CHECK_CHAT_ID, admin_message_id)
+
+#     await DB.increment_statistics(1, 'comments')
+#     await DB.increment_statistics(2, 'comments')
+#     await DB.increment_statistics(1, 'all_taasks')
+#     await DB.increment_statistics(2, 'all_taasks')
+
+#     await callback.answer("✅ Задание подтверждено.")
+
+# # Обработчик отклонения задания админом
+# @tasks.callback_query(F.data.startswith('reject_comment_'))
+# async def reject_comment_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
+#     parts = callback.data.split('_')
+#     if len(parts) < 3:
+#         await callback.answer("Некорректный формат callback данных.")
+#         return
+
+#     task_id = int(parts[-2])  # Предпоследний элемент — task_id
+#     user_id = int(parts[-1])  # Последний элемент — user_id
+
+#     # Получаем задание из таблицы ожидания
+#     pending_task = await DB.get_pending_reaction_task(task_id, user_id)
+#     if not pending_task:
+#         await callback.answer("Задание не найдено.")
+#         return
+
+#     # Извлекаем данные из кортежа по индексам
+#     pending_id, user_id, task_id, target_id, chat_id, message_id, screenshot, status = pending_task
+
+#     # Добавляем задание в список проваленных для пользователя
+#     await DB.add_failed_task(user_id, task_id)
+
+#     # Удаляем задание из таблицы ожидания
+#     await DB.delete_pending_reaction_task(task_id, user_id)
+
+#     chat: Chat = await bot.get_chat(chat_id)
+
+#     # Уведомляем пользователя
+#     await bot.send_message(
+#         user_id,
+#         f"❌ <b>Ваше задание на комментарий отклонено.</b>\n\n"
+#         f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
+#         f"🆔 ID задания: {task_id}\n\n"
+#         f"Пожалуйста, убедитесь, что вы выполнили задание правильно."
+#     )
+
+#     # Уведомляем админа
+#     await bot.send_message(
+#         CHECK_CHAT_ID,
+#         f"❌ <b>Задание на комментарий отклонено.</b>\n\n"
+#         f"👤 Пользователь: @{callback.from_user.username} (ID: {user_id})\n"
+#         f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
+#         f"🆔 ID задания: {task_id}"
+#     )
+
+#     # Удаляем сообщение с заданием
+#     data = await state.get_data()
+#     admin_message_id = data.get('admin_message_id')
+#     if admin_message_id:
+#         await bot.delete_message(CHECK_CHAT_ID, admin_message_id)
+
+#     await callback.answer("❌ Задание отклонено.")
+
+
+
+
+
+
+
+
 @tasks.callback_query(F.data == 'work_comment')
 async def works_like_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id
     
+    async def parse_target_id(target: str) -> tuple:
+        """Парсит target_id в формате (chat_id, message_id)"""
+        try:
+            # Обрабатываем разные форматы:
+            if ':' in target:
+                # Форматы: channel_id:post_id, username:post_id, @username:post_id
+                parts = target.split(':')
+                channel_part = parts[0].strip()
+                post_id = parts[1].strip()
+                
+                # Парсим часть канала
+                if channel_part.startswith('@'):
+                    # Формат @username:post_id
+                    chat = await bot.get_chat(channel_part)
+                elif channel_part.isdigit() or (channel_part.startswith('-') and channel_part[1:].isdigit()):
+                    # Формат channel_id:post_id
+                    chat = await bot.get_chat(int(channel_part))
+                else:
+                    # Пробуем как username без @ (формат username:post_id)
+                    try:
+                        chat = await bot.get_chat(f"@{channel_part}")
+                    except:
+                        # Пробуем как ID, если вдруг число без минуса
+                        if channel_part.isdigit():
+                            chat = await bot.get_chat(int(f"-100{channel_part}"))
+                        else:
+                            raise ValueError(f"Неизвестный формат ссылки: {channel_part}")
+                
+                return chat.id, int(post_id)
+            
+            elif '_' in target:
+                # Формат @username_post_id
+                parts = target.split('_')
+                if len(parts) == 2 and parts[0].startswith('@'):
+                    chat = await bot.get_chat(parts[0])
+                    return chat.id, int(parts[1])
+                raise ValueError("Неверный формат @username_post_id")
+            
+            else:
+                raise ValueError("Неизвестный формат target_id")
+                
+        except Exception as e:
+            logger.info(f"Ошибка парсинга target_id {target}: {str(e)}")
+            raise
+
     try:
-        # Получаем задания из Redis или БД
-        all_tasks = await RedisTasksManager.get_cached_tasks('comment') or []
-        print(all_tasks)
-        if not all_tasks:
-            await RedisTasksManager.refresh_task_cache(bot, 'chat')
-            all_tasks = await RedisTasksManager.get_cached_tasks('chat') or []
-
-        if all_tasks:
-            available_tasks = [
-                task for task in all_tasks
-                if not await DB.is_task_completed(user_id, task['id'])
-                and not await DB.is_task_failed(user_id, task['id'])
-                and not await DB.is_task_pending(user_id, task['id'])
-            ]
-            
-            if not available_tasks:
-                await callback.message.edit_text(
-                    "На данный момент доступных заданий на комментарии нет, возвращайся позже 😉",
-                    reply_markup=back_work_menu_kb(user_id)
-                )
-                return 
-            
-            random_task = random.choice(available_tasks)
-            task_id, target_id, amount = random_task['id'], random_task['target_id'], random_task['amount']
-            chat_id, message_id = map(int, target_id.split(":"))
-            
+        # 1. Получаем задания из кэша
+        cached_tasks = await RedisTasksManager.get_cached_tasks('comment')
+        
+        if not cached_tasks:
+            await callback.message.edit_text(
+                "На данный момент доступных заданий на комментарии нет, возвращайся позже 😉",
+                reply_markup=back_work_menu_kb(user_id))
+            return
+        
+        # 2. Фильтруем задания для текущего пользователя
+        available_tasks = []
+        for task in cached_tasks:
             try:
-                await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
-                await callback.message.answer_sticker(
-                    'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
-                await asyncio.sleep(3)
-
-                builder = InlineKeyboardBuilder()
-                builder.add(InlineKeyboardButton(text="Проверить ✅", callback_data=f"comment_{task_id}"))
-                builder.add(InlineKeyboardButton(text="✋Ручная проверка", callback_data=f"2comment_{task_id}"))
-                builder.add(InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}"))
-                builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_comment_{task_id}"))
-                builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
-                builder.adjust(2, 2, 1)
-
-                await callback.message.answer(
-                    "💬 Напишите комментарий под постом и нажмите кнопку <b>Проверить</b>...",
-                    reply_markup=builder.as_markup()
+                # Проверяем статус задания
+                if task.get('status', 1) not in [1, 2]:  # 1 - активное, 2 - на проверке
+                    continue
+                    
+                # Проверяем, не выполнял ли пользователь это задание ранее
+                if not await DB.is_task_available_for_user(user_id, task['id']):
+                    continue
+                
+                # Пробуем распарсить target_id
+                try:
+                    chat_id, message_id = await parse_target_id(task['target_id'])
+                    task['parsed_target'] = (chat_id, message_id)  # Сохраняем для дальнейшего использования
+                    available_tasks.append(task)
+                except Exception as e:
+                    logger.info(f"Неверный формат target_id в задании {task['id']}: {task['target_id']} - {str(e)}")
+                    continue
+                    
+            except Exception as e:
+                logger.info(f"Ошибка проверки задания {task.get('id')}: {str(e)}")
+                continue
+        
+        if not available_tasks:
+            await callback.message.edit_text(
+                "На данный момент доступных заданий на комментарии нет, возвращайся позже 😉",
+                reply_markup=back_work_menu_kb(user_id))
+            return 
+        
+        # 3. Выбираем случайное задание
+        random_task = random.choice(available_tasks)
+        task_id = random_task['id']
+        chat_id, message_id = random_task['parsed_target']
+        
+        try:
+            # Пробуем переслать сообщение
+            try:
+                await bot.forward_message(
+                    chat_id=user_id,
+                    from_chat_id=chat_id,
+                    message_id=message_id,
+                    disable_notification=True
                 )
             except Exception as e:
-                print(f"Ошибка: {e}")
-                await callback.message.edit_text(
-                    "Произошла ошибка при обработке задания. Попробуйте позже.",
-                    reply_markup=back_work_menu_kb(user_id)
-                )
-        else:
-            await callback.message.edit_text(
-                "На данный момент заданий на комментарии нет, возвращайся позже 😉",
-                reply_markup=back_work_menu_kb(user_id)
-            )
-    except Exception as e:
-        print(f"Ошибка в works_like_handler: {e}")
-        await callback.message.edit_text(
-            "Произошла ошибка. Попробуйте позже.",
-            reply_markup=back_work_menu_kb(user_id)
-        )
-
-@tasks.callback_query(F.data.startswith('comment_'))
-async def check_like_handler(callback: types.CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-    task_id = int(callback.data.split('_')[-1])  # Извлекаем ID задания из callback_data
-
-    # Получаем данные задания
-    task = await DB.get_task_by_id(task_id)
-    if not task:
-        await callback.answer("Задание не найдено.")
-        return
-
-    target_id = task[2]
-    chat_id, message_id = map(int, target_id.split(":"))
-
-    # Проверяем, поставил ли пользователь лайк
-    like_detected = None #await comment(user_id, chat_id, message_id)
-
-    if like_detected:
-        # # Лайк обнаружен
-        await DB.increment_statistics(1, 'comments')
-        await DB.increment_statistics(2, 'comments')
-        await DB.increment_statistics(1, 'all_taasks')
-        await DB.increment_statistics(2, 'all_taasks')
-
-        await callback.message.answer(
-            f"👍 <b>Комментарий засчитан! +{all_price["comment"]} MITcoin</b>\n\nНажмите кнопку для перехода к следующему заданию.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Дальше ⏭️", callback_data="work_comment")]]
-            )
-        ) 
-
-        await update_dayly_and_weekly_tasks_statics(user_id)
-        await DB.update_task_amount(task_id)
-        updated_task = await DB.get_task_by_id(task_id)
-        await DB.add_completed_task(user_id, task_id, target_id, all_price["comment"], task[1], status=0)
-        await DB.add_balance(amount=all_price["comment"], user_id=user_id)
-
-        if updated_task[3] == 0:
-            delete_task = await DB.get_task_by_id(task_id)
-            creator_id = delete_task[1]
-            await DB.delete_task(task_id)
-            await bot.send_message(creator_id, f"🎉 Одно из ваших заданий на комментарий было успешно выполнено!",
-                                   reply_markup=back_menu_kb(user_id))
+                logger.info(f"Не удалось переслать сообщение {message_id} из чата {chat_id}: {str(e)}")
+                raise ValueError("Сообщение недоступно")
             
-            await RedisTasksManager.refresh_task_cache(bot, "comment")
-    else:
-        # Лайк не обнаружен
-        await callback.answer("❌ Комментарий не был написан. Попробуйте ещё раз.", show_alert=True)
-
-# Обработчик нажатия на кнопку "2comment_"
-@tasks.callback_query(F.data.startswith('2comment_'))
-async def _(callback: types.CallbackQuery, state: FSMContext):
-    user_id = callback.from_user.id
-    task_id = int(callback.data.split('_')[-1])  # Извлекаем ID задания из callback_data
-
-    # Получаем данные задания
-    task = await DB.get_task_by_id(task_id)
-    if not task:
-        await callback.answer("Задание не найдено.")
-        return
-
-    target_id = task[2]
-    chat_id, message_id = map(int, target_id.split(":"))
-    await callback.message.answer(
-        '😞 Не получилось проверить комментарий автоматически?\n'
-        '✌️ Нам жаль, что вы столкнулись с этой проблемой, а пока мы решаем её, вы можете попробовать ручную проверку.\n\n'
-        '❗️ Чтобы сделать это, отправьте сюда скриншот того, как вы выполнили задание. Мы заметим это и в скором времени начислим вам награду!'
-    )
-    await state.set_state(CommentProof.waiting_for_screenshot)
-    await state.update_data(task_id=task_id, target_id=target_id, chat_id=chat_id, message_id=message_id)
-
-# Обработчик скриншота
-@tasks.message(CommentProof.waiting_for_screenshot)
-async def handle_screenshot(message: types.Message, state: FSMContext, bot: Bot):
-    user_id = message.from_user.id
-    data = await state.get_data()
-    task_id = data.get('task_id')
-    target_id = data.get('target_id')
-    chat_id = data.get('chat_id')
-    message_id = data.get('message_id')
-
-    if not message.photo:
-        await message.answer("❌ Пожалуйста, отправьте скриншот.")
-        return
-
-    screenshot_id = message.photo[-1].file_id  # Берём самое большое изображение
-
-    # Добавляем задание в таблицу ожидания подтверждения
-    await DB.add_pending_reaction_task( 
-        user_id=user_id,
-        task_id=task_id,
-        target_id=target_id,
-        post_id=chat_id,
-        reaction=message_id,
-        screenshot=screenshot_id
-    )
-
-    # Уведомляем пользователя
-    kb = InlineKeyboardBuilder()
-    kb.button(text='⏭ Далее', callback_data='work_comment')
-    kb.button(text='🔙 Назад', callback_data='work_menu')
-    await message.answer("✅ Скриншот отправлен на проверку. Ожидайте подтверждения.", reply_markup=kb.as_markup())
-
-    chat: Chat = await bot.get_chat(chat_id)
-
-    # Отправляем админу задание на проверку
-    builder = InlineKeyboardBuilder()
-    builder.add(InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm_comment_{task_id}_{user_id}"))
-    builder.add(InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_comment_{task_id}_{user_id}"))
-    builder.add(InlineKeyboardButton(text="🔗 Перейти к посту", url=f"https://t.me/{chat.username}/{message_id}"))
-    builder.adjust(1)
-
-    sent_message = await bot.send_photo(
-        CHECK_CHAT_ID,
-        photo=screenshot_id,
-        caption=(
-            f"#комментарий\n"
-            f"📝 <b>Задание на комментарий</b>\n\n"
-            f"👤 Пользователь: @{message.from_user.username} (ID: {user_id})\n"
-            f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
-            f"🆔 ID задания: {task_id}\n\n"
-            f"Проверьте выполнение задания:"
-        ),
-        reply_markup=builder.as_markup()
-    )
-
-    # Сохраняем ID сообщения в state
-    await state.update_data(admin_message_id=sent_message.message_id)
-
-    # Запускаем фоновую задачу для автоматического подтверждения через 24 часа
-    asyncio.create_task(auto_confirm_comment_task(task_id, user_id, bot, message.from_user.username, state))
-
-    await state.clear()
-
-# Функция для автоматического подтверждения через 24 часа
-async def auto_confirm_comment_task(task_id, user_id, bot, username, state):
-    await asyncio.sleep(24 * 3600)  # Ждем 24 часа
-    pending_task = await DB.get_pending_reaction_task(task_id, user_id)
-    if pending_task:
-        await confirm_comment_handler(task_id, user_id, bot, username, state)
-
-# Обработчик подтверждения задания админом
-@tasks.callback_query(F.data.startswith('confirm_comment_'))
-async def confirm_comment_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
-    parts = callback.data.split('_')
-    if len(parts) < 3:
-        await callback.answer("Некорректный формат callback данных.")
-        return
-
-    task_id = int(parts[-2])  # Предпоследний элемент — task_id
-    user_id = int(parts[-1])  # Последний элемент — user_id
-
-    # Получаем задание из таблицы ожидания
-    pending_task = await DB.get_pending_reaction_task(task_id, user_id)
-    if not pending_task:
-        await callback.answer("Задание не найдено.")
-        return
-
-    # Извлекаем данные из кортежа по индексам
-    pending_id, user_id, task_id, target_id, chat_id, message_id, screenshot, status = pending_task
-
-    # Добавляем задание в таблицу completed_tasks
-    await DB.add_completed_task(
-        user_id=user_id,
-        task_id=task_id,
-        target_id=target_id,
-        task_sum=all_price["comment"],
-        owner_id=user_id,
-        status=0,
-        other=0
-    )
-
-    # Удаляем задание из таблицы ожидания
-    await DB.delete_pending_reaction_task(task_id, user_id)
-
-    # Начисляем баланс пользователю
-    await DB.add_balance(amount=all_price["comment"], user_id=user_id)
-
-    task = await DB.get_task_by_id(task_id)
-    if task:
-        new_amount = task[3] - 1  # task[3] — это текущее количество выполнений
-        await DB.update_task_amount2(task_id, new_amount)
-
-    chat: Chat = await bot.get_chat(chat_id)
-
-    # Уведомляем пользователя
-    await bot.send_message(
-        user_id,
-        f"🎉 <b>Ваше задание на комментарий подтверждено!</b>\n\n"
-        f"💸 Вам начислено: {all_price["comment"]} MITcoin\n"
-        f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
-        f"🆔 ID задания: {task_id}"
-    )
-
-    await update_dayly_and_weekly_tasks_statics(user_id)
-
-    # Уведомляем создателя задания
-    creator_id = user_id
-    # await bot.send_message(
-    #     creator_id,
-    #     f"🎉 <b>Ваше задание на комментарий выполнено!</b>\n\n"
-    #     f"👤 Пользователь: @{callback.from_user.username} (ID: {user_id})\n" 
-    #     f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
-    #     f"🆔 ID задания: {task_id}"
-    # )
-
-    # Удаляем сообщение с заданием
-    data = await state.get_data()
-    admin_message_id = data.get('admin_message_id')
-    if admin_message_id:
-        await bot.delete_message(CHECK_CHAT_ID, admin_message_id)
-
-    await DB.increment_statistics(1, 'comments')
-    await DB.increment_statistics(2, 'comments')
-    await DB.increment_statistics(1, 'all_taasks')
-    await DB.increment_statistics(2, 'all_taasks')
-
-    await callback.answer("✅ Задание подтверждено.")
-
-# Обработчик отклонения задания админом
-@tasks.callback_query(F.data.startswith('reject_comment_'))
-async def reject_comment_handler(callback: types.CallbackQuery, bot: Bot, state: FSMContext):
-    parts = callback.data.split('_')
-    if len(parts) < 3:
-        await callback.answer("Некорректный формат callback данных.")
-        return
-
-    task_id = int(parts[-2])  # Предпоследний элемент — task_id
-    user_id = int(parts[-1])  # Последний элемент — user_id
-
-    # Получаем задание из таблицы ожидания
-    pending_task = await DB.get_pending_reaction_task(task_id, user_id)
-    if not pending_task:
-        await callback.answer("Задание не найдено.")
-        return
-
-    # Извлекаем данные из кортежа по индексам
-    pending_id, user_id, task_id, target_id, chat_id, message_id, screenshot, status = pending_task
-
-    # Добавляем задание в список проваленных для пользователя
-    await DB.add_failed_task(user_id, task_id)
-
-    # Удаляем задание из таблицы ожидания
-    await DB.delete_pending_reaction_task(task_id, user_id)
-
-    chat: Chat = await bot.get_chat(chat_id)
-
-    # Уведомляем пользователя
-    await bot.send_message(
-        user_id,
-        f"❌ <b>Ваше задание на комментарий отклонено.</b>\n\n"
-        f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
-        f"🆔 ID задания: {task_id}\n\n"
-        f"Пожалуйста, убедитесь, что вы выполнили задание правильно."
-    )
-
-    # Уведомляем админа
-    await bot.send_message(
-        CHECK_CHAT_ID,
-        f"❌ <b>Задание на комментарий отклонено.</b>\n\n"
-        f"👤 Пользователь: @{callback.from_user.username} (ID: {user_id})\n"
-        f"📌 Пост: https://t.me/{chat.username}/{message_id}\n"
-        f"🆔 ID задания: {task_id}"
-    )
-
-    # Удаляем сообщение с заданием
-    data = await state.get_data()
-    admin_message_id = data.get('admin_message_id')
-    if admin_message_id:
-        await bot.delete_message(CHECK_CHAT_ID, admin_message_id)
-
-    await callback.answer("❌ Задание отклонено.")
-
-
-
-
-
-
-
-
-@tasks.callback_query(F.data == 'work_comment')
-async def works_like_handler(callback: types.CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-    all_tasks = await DB.select_like_comment()
-
-    if all_tasks:
-        available_tasks = [
-            task for task in all_tasks
-            if not await DB.is_task_completed(user_id, task[0])
-            and not await DB.is_task_failed(user_id, task[0])
-            and not await DB.is_task_pending(user_id, task[0])
-        ]
-        
-        if not available_tasks:
-            await callback.message.edit_text(
-                "На данный момент доступных заданий на комментарии нет, возвращайся позже 😉",
-                reply_markup=back_work_menu_kb(user_id)
-            )
-            return 
-        
-        random_task = random.choice(available_tasks)
-        task_id, target_id, amount = random_task[0], random_task[2], random_task[3]
-        chat_id, message_id = map(int, target_id.split(":"))
-        
-        try:
-            await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
+            # Получаем информацию о канале для формирования ссылки
+            try:
+                chat = await bot.get_chat(chat_id)
+                username = f"@{chat.username}" if chat.username else None
+                invite_link = chat.invite_link or f"https://t.me/c/{str(abs(chat_id))}/{message_id}"
+            except:
+                username = None
+                invite_link = f"https://t.me/c/{str(abs(chat_id))}/{message_id}"
+            
             await callback.message.answer_sticker(
                 'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
             await asyncio.sleep(3)
@@ -524,92 +625,32 @@ async def works_like_handler(callback: types.CallbackQuery, bot: Bot):
             builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
             builder.adjust(2, 2, 1)
 
-            await callback.message.answer(
+            # Формируем информационное сообщение
+            info_msg = (
                 "💬 Напишите комментарий под постом и нажмите кнопку <b>Проверить</b>, чтобы подтвердить выполнение задания.\n\n"
+                f"🔗 Ссылка на пост: {invite_link}\n"
+                f"🆔 ID поста: {message_id}\n"
+                f"👤 Канал: {username or 'не указан'}\n\n"
                 "<em>Комментарий не должен быть эмодзи, стикером, GIF или другим не текстовым содержимым.</em>\n"
                 "<em>Комментарий должен содержать осмысленный текст, соответствующий теме поста.</em>\n"
-                "<em>Комментарии, не соответствующие этим критериям, могут быть отклонены при проверке.</em>\n\n",
-                reply_markup=builder.as_markup()
+                "<em>Комментарии, не соответствующие этим критериям, могут быть отклонены при проверке.</em>\n\n"
             )
+
+            await callback.message.answer(info_msg, reply_markup=builder.as_markup())
+            
         except Exception as e:
-            print(f"Ошибка: {e}")
-            await callback.message.edit_text(
-                "Произошла ошибка при обработке задания. Попробуйте позже.",
-                reply_markup=back_work_menu_kb(user_id))
-    else:
+            logger.info(f"Ошибка обработки задания {task_id}: {str(e)}")
+            # Удаляем проблемное задание из кэша и пробуем снова
+            await RedisTasksManager.handle_invalid_task('comment', random_task, bot)
+            await works_like_handler(callback, bot)  # Рекурсивный вызов
+            
+    except Exception as e:
+        logger.info(f"Критическая ошибка в works_like_handler: {str(e)}")
+        await callback.answer("Произошла ошибка. Попробуйте позже.", show_alert=True)
         await callback.message.edit_text(
-            "На данный момент заданий на комментарии нет, возвращайся позже 😉",
+            "⚠️ Не удалось загрузить задания. Пожалуйста, попробуйте позже.",
             reply_markup=back_work_menu_kb(user_id))
-        
-
-
-
-
-
-
-
-@tasks.callback_query(F.data == 'work_comment')
-async def works_like_handler(callback: types.CallbackQuery, bot: Bot):
-    user_id = callback.from_user.id
-    all_tasks = await DB.select_like_comment()  # Получаем список всех заданий на комментарии
-
-    if all_tasks:
-        # Фильтруем задания, исключая выполненные, проваленные и находящиеся на проверке
-        available_tasks = [
-            task for task in all_tasks
-            if not await DB.is_task_completed(user_id, task[0])  # Исключаем выполненные
-            and not await DB.is_task_failed(user_id, task[0])  # Исключаем проваленные
-            and not await DB.is_task_pending(user_id, task[0])  # Исключаем задания на проверке
-        ]
-        
-        if not available_tasks:
-            await callback.message.edit_text(
-                "На данный момент доступных заданий на комментарии нет, возвращайся позже 😉",
-                reply_markup=back_work_menu_kb(user_id)
-            )
-            return 
-        
-        # Выбираем случайное задание из списка доступных
-        random_task = random.choice(available_tasks)
-        task_id, target_id, amount = random_task[0], random_task[2], random_task[3]
-        chat_id, message_id = map(int, target_id.split(":"))
-        
-        try:
-            # Пересылаем пост пользователю
-            await bot.forward_message(chat_id=user_id, from_chat_id=chat_id, message_id=message_id)
-            await callback.message.answer_sticker(
-                'CAACAgIAAxkBAAENFeZnLS0EwvRiToR0f5njwCdjbSmWWwACTgEAAhZCawpt1RThO2pwgjYE')
-            await asyncio.sleep(3)
-
-            # Создаем клавиатуру с кнопкой "Проверить"
-            builder = InlineKeyboardBuilder()
-            builder.add(InlineKeyboardButton(text="Проверить ✅", callback_data=f"comment_{task_id}"))
-            builder.add(InlineKeyboardButton(text="✋Ручная проверка", callback_data=f"2comment_{task_id}"))
-            builder.add(InlineKeyboardButton(text="⏭ Пропустить", callback_data=f"skip_task_{task_id}"))
-            builder.add(InlineKeyboardButton(text="Репорт ⚠️", callback_data=f"report_comment_{task_id}"))
-            builder.add(InlineKeyboardButton(text="🔙 Назад", callback_data="work_menu"))
-
-            builder.adjust(2, 2, 1)
-
-            await callback.message.answer(
-                "💬 Напишите комментарий под постом и нажмите кнопку <b>Проверить</b>, чтобы подтвердить выполнение задания.\n"
-                "<em>Комментарий не должен быть эмодзи, стикером, GIF или другим не текстовым содержимым.</em>\n"
-                "<em>Комментарий должен содержать осмысленный текст, соответствующий теме поста.</em>\n"
-                "<em>Комментарии, не соответствующие этим критериям, могут быть отклонены при проверке.</em>\n\n",
-                reply_markup=builder.as_markup()
-            )
-        except Exception as e:
-            print(f"Ошибка: {e}")
-            await callback.message.edit_text(
-                "Произошла ошибка при обработке задания. Попробуйте позже.",
-                reply_markup=back_work_menu_kb(user_id)
-            )
-    else:
-        await callback.message.edit_text(
-            "На данный момент заданий на комментарии нет, возвращайся позже 😉",
-            reply_markup=back_work_menu_kb(user_id)
-        )
-
+                 
 @tasks.callback_query(F.data.startswith('comment_'))
 async def check_like_handler(callback: types.CallbackQuery, bot: Bot):
     user_id = callback.from_user.id

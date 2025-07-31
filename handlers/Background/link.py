@@ -27,9 +27,9 @@ async def update_tasks_periodically():
         await set_cached_data(cache_key, all_tasks, ttl=600)
         with cache_lock:
             available_tasks = all_tasks
-            print(f"Задания обновлены. Доступно: {len(available_tasks)}")
+            logger.info(f"Задания обновлены. Доступно: {len(available_tasks)}")
             
     except Exception as e:
-        print(f"Ошибка в update_tasks_periodically: {e}")
+        logger.info(f"Ошибка в update_tasks_periodically: {e}")
 
     await asyncio.sleep(600)

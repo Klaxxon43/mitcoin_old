@@ -161,7 +161,7 @@ async def boost_post4(message: types.Message, state: FSMContext, bot: Bot):
             return
 
     except Exception as e:
-        print("Ошибка при проверке канала:", e)
+        logger.info("Ошибка при проверке канала:", e)
         await message.answer("❌ Ошибка при проверке канала.")
         return
 
@@ -272,7 +272,7 @@ async def check_boost_admin_rights(callback: types.CallbackQuery, state: FSMCont
         await state.clear()
 
     except Exception as e:
-        print("Ошибка в check_boost_admin_rights:", e)
+        logger.info("Ошибка в check_boost_admin_rights:", e)
         await callback.message.edit_text("⚠ Произошла ошибка при проверке прав. Попробуйте позже.")
 
 
@@ -322,9 +322,7 @@ async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
     # Фильтруем задания, исключая те, которые пользователь уже выполнял
     available_tasks = [
         task for task in cached_tasks
-        if not await DB.is_task_completed(user_id, task['id'])
-        and not await DB.is_task_failed(user_id, task['id'])
-        and not await DB.is_task_pending(user_id, task['id'])
+        if await DB.is_task_available_for_user(user_id, task['id'])
     ]
     
     if not available_tasks:
@@ -332,7 +330,7 @@ async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
             "На данный момент доступных заданий на буст нет, возвращайся позже 😉",
             reply_markup=back_work_menu_kb(user_id)
         )
-        return
+
     
     random_task = random.choice(available_tasks)
     task_id, target_id, days = random_task['id'], random_task['target_id'], random_task['days']
@@ -365,7 +363,7 @@ async def works_boost_handler(callback: types.CallbackQuery, bot: Bot):
             reply_markup=builder.as_markup()
         )
     except Exception as e:
-        print(f"Ошибка: {e}")
+        logger.info(f"Ошибка: {e}")
         await callback.message.edit_text(
             "Произошла ошибка при обработке задания. Попробуйте позже.",
             reply_markup=back_work_menu_kb(user_id))
@@ -684,26 +682,26 @@ def is_user_boosting(chat_boost: ChatBoostUpdated, user_id: int, chat_id: int) -
 
 @tasks.chat_boost()
 async def on_chat_boost(chat_boost: ChatBoostUpdated, bot: Bot):
-    print(f"Получено событие буста: {chat_boost}")  # Отладочный вывод
+    logger.info(f"Получено событие буста: {chat_boost}")  # Отладочный вывод
     
     source = chat_boost.boost.source
-    print(f"Источник буста: {source}")  # Отладочный вывод
+    logger.info(f"Источник буста: {source}")  # Отладочный вывод
     
     # Обрабатываем только бусты от премиум пользователей
     if isinstance(source, ChatBoostSourcePremium):
-        print("Буст от премиум пользователя")  # Отладочный вывод
+        logger.info("Буст от премиум пользователя")  # Отладочный вывод
         
         if source.user is None:
-            print("Ошибка: пользователь не указан")  # Отладочный вывод
+            logger.info("Ошибка: пользователь не указан")  # Отладочный вывод
             return
             
         user_id = source.user.id
         chat_id = chat_boost.chat.id
-        print(f"User ID: {user_id}, Chat ID: {chat_id}")  # Отладочный вывод
+        logger.info(f"User ID: {user_id}, Chat ID: {chat_id}")  # Отладочный вывод
 
         # Проверяем, что буст сделан на наш официальный канал
         if str(chat_id) == str(OFFICIAL_CHANNEL_ID):
-            print("Буст на официальный канал - начисляем бонус")  # Отладочный вывод
+            logger.info("Буст на официальный канал - начисляем бонус")  # Отладочный вывод
             # Начисляем баланс
             await DB.add_balance(user_id, 10000)
             # Сохраняем с пометкой о начислении
@@ -712,18 +710,18 @@ async def on_chat_boost(chat_boost: ChatBoostUpdated, bot: Bot):
                 chat_id=chat_id, 
                 status=True,  # Флаг успешного начисления
             )
-            print(f"Начислено 10000 пользователю {user_id} за буст канала {chat_id}")  # Отладочный вывод
+            logger.info(f"Начислено 10000 пользователю {user_id} за буст канала {chat_id}")  # Отладочный вывод
             logger.info(f"Начислено 10000 пользователю {user_id} за буст канала {chat_id}")
             return
         
-        print("Буст на другой канал - сохраняем без начисления")  # Отладочный вывод
+        logger.info("Буст на другой канал - сохраняем без начисления")  # Отладочный вывод
         # Для других каналов сохраняем без начисления
         await Boost.add_user_boost(
             user_id=user_id,
             chat_id=chat_id
         )
     else:
-        print("Буст не от премиум пользователя - игнорируем")  # Отладочный вывод
+        logger.info("Буст не от премиум пользователя - игнорируем")  # Отладочный вывод
 
 @tasks.removed_chat_boost()
 async def on_chat_boost_removed(removed_chat_boost: ChatBoostRemoved, bot: Bot):
@@ -770,6 +768,6 @@ async def get_chat_info(bot: Bot, target_id):
                 return chat
                 
     except Exception as e:
-        print(f"Error getting chat info for {target_id}: {e}")
+        logger.info(f"Error getting chat info for {target_id}: {e}")
         return None
 

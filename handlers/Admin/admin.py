@@ -66,7 +66,7 @@ async def view_user_profile_handler(callback: types.CallbackQuery, state: FSMCon
 #                 )
 #         except Exception as e:
 #             # Если возникает ошибка (например, неправильный user_id), пропускаем пользователя
-#             print(f"Ошибка при проверке пользователя {user_id}: {e}")
+#             logger.info(f"Ошибка при проверке пользователя {user_id}: {e}")
 #             continue  # Переходим к следующему пользователю
 
 #     # Отправляем финальное сообщение

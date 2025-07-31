@@ -5,16 +5,16 @@ from .locks import *
 async def remind_mining_collection(bot):
     while True:
         try:
-            print(f"\n[{datetime.now()}] Проверка майнинга...")
+            logger.info(f"\n[{datetime.now()}] Проверка майнинга...")
             
             async with DB.con.cursor() as cur:
                 # 1. Проверка структуры таблицы
                 await cur.execute("PRAGMA table_info(mining)")
                 columns = {col[1]: col[2] for col in await cur.fetchall()}
-                print("Структура таблицы:", columns)
+                logger.info("Структура таблицы:", columns)
                 
                 if 'reminder_sent' not in columns:
-                    print("Добавляем колонку reminder_sent...")
+                    logger.info("Добавляем колонку reminder_sent...")
                     await cur.execute("ALTER TABLE mining ADD COLUMN reminder_sent BOOLEAN DEFAULT FALSE")
                     await DB.con.commit()
                 
@@ -27,7 +27,7 @@ async def remind_mining_collection(bot):
                     FROM mining 
                 """)
                 users = await cur.fetchall()
-                print(f"Всего пользователей с earning > 0: {len(users)}")
+                logger.info(f"Всего пользователей с earning > 0: {len(users)}")
                 
                 for user_id, mining_time_str, earning, reminder_sent in users:
                     try:
@@ -37,10 +37,10 @@ async def remind_mining_collection(bot):
                         
                         # Вычисляем разницу в часах
                         hours_passed = (current_time_dt - mining_time).total_seconds() / 3600
-                        print(f"Пользователь {user_id}: прошло {hours_passed:.2f} часов")
+                        logger.info(f"Пользователь {user_id}: прошло {hours_passed:.2f} часов")
                         
                         if not reminder_sent and hours_passed >= 24:
-                            print(f"Отправляем напоминание пользователю {user_id}")
+                            logger.info(f"Отправляем напоминание пользователю {user_id}")
                             await bot.send_message(
                                 chat_id=user_id,
                                 text=f"⏳ Ваш майнинг готов к сбору!"
@@ -53,12 +53,12 @@ async def remind_mining_collection(bot):
                             await DB.con.commit()
                             
                     except Exception as e:
-                        print(f"Ошибка обработки пользователя {user_id}: {str(e)}")
+                        logger.info(f"Ошибка обработки пользователя {user_id}: {str(e)}")
                         continue
                         
         except Exception as e:
-            print(f"Критическая ошибка: {str(e)}")
+            logger.info(f"Критическая ошибка: {str(e)}")
             import traceback
-            traceback.print_exc()
+            traceback.logger.info_exc()
         
         await asyncio.sleep(300)

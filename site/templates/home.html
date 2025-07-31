@@ -1,39 +1,66 @@
 {% extends "base.html" %}
-{% block title %}Главная страница{% endblock %}
 
-{% block css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+{% block title %}Telegram Mini App - Майнинг{% endblock %}
+
+{% block head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
-<div class="welcome-card">
-  <h2>Добро пожаловать!</h2>
-  <div id="welcome-message">Загрузка...</div>
-</div>
-
-<div class="actions-card">
-  <h3>Быстрые действия</h3>
-  <div class="actions-grid">
-    <div class="action-item">
-      <i class="fas fa-wallet"></i>
-      <span>Кошелек</span>
+  <div class="content">
+    <!-- Заголовок майнинга -->
+    <div class="mining-header">
+      <div class="mining-icon-container">
+        <div class="mining-icon">⛏️</div>
+      </div>
+      <h1 class="mining-title">Майнинг</h1>
+      <button id="refresh-button" class="refresh-button">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M22 12C22 17.52 17.52 22 12 22C6.48 22 2 17.52 2 12C2 6.48 6.48 2 12 2C15.76 2 19.14 4.14 20.97 7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M22 6V2H18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M17 7L21 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
     </div>
-    <div class="action-item">
-      <i class="fas fa-exchange-alt"></i>
-      <span>Переводы</span>
-    </div>
-    <div class="action-item">
-      <i class="fas fa-history"></i>
-      <span>История</span>
-    </div>
-    <div class="action-item">
-      <i class="fas fa-cog"></i>
-      <span>Настройки</span>
+    
+    <!-- Основной блок майнинга -->
+    <div id="mining-container" class="mining-container">
+      <!-- Контент будет динамически подгружаться через JS -->
     </div>
   </div>
-</div>
+
+  <!-- Шаблоны для динамического контента -->
+  <template id="active-mining-template">
+    <div class="status-active">Майнинг активен</div>
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-filled"></div>
+      </div>
+      <div class="mining-amount">0</div>
+    </div>
+    <div class="mining-stats">
+      <div class="stat-item">
+        <span class="stat-label">Намайнено</span>
+        <span class="stat-value mined-time-value">0:00</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Монет</span>
+        <span class="stat-value coins-value">0</span>
+      </div>
+    </div>
+    <button class="collect-button">Собрать</button>
+  </template>
+  
+  <template id="inactive-mining-template">
+    <div class="mining-info">
+      <p>Майнинг не активирован</p>
+      <p>Начните майнинг, чтобы зарабатывать криптовалюту</p>
+    </div>
+    <button class="buy-button">Активировать майнинг</button>
+  </template>
 {% endblock %}
 
-{% block js %}
-<script src="{{ url_for('static', filename='js/home.js') }}"></script>
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/home.js') }}"></script>
 {% endblock %}

@@ -61,6 +61,7 @@ class CreateContest(StatesGroup):
     additional_conditions = State()
     contest_content = State()
     contest_text = State()
+    contest_text_input = State()
     conditions = State()
     channel_sub_input = State()
 

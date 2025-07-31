@@ -27,10 +27,10 @@ async def update_boost_tasks_periodically():
         await set_cached_data(cache_key, all_tasks, ttl=600)
         with cache_lock:
             available_tasks = all_tasks
-            print(f"Задания обновлены. Доступно: {len(available_tasks)}")
+            logger.info(f"Задания обновлены. Доступно: {len(available_tasks)}")
             
     except Exception as e:
-        print(f"Ошибка в update_tasks_periodically: {e}")
+        logger.info(f"Ошибка в update_tasks_periodically: {e}")
 
     await asyncio.sleep(600)
 
@@ -63,7 +63,7 @@ async def extract_chat_id_or_username(target: str) -> str:
 async def check_subscriptions_periodically_boost(bot: Bot):
     while True:
         await asyncio.sleep(7200)  # Каждые 2 часа
-        print('Провожу проверку')
+        logger.info('Провожу проверку')
         try:
             # Получаем активные задания (status = 1) и задания на буст (status = 6)
             active_tasks = await DB.get_active_completed_tasks()
@@ -77,7 +77,7 @@ async def check_subscriptions_periodically_boost(bot: Bot):
                 try:
                     channel_username = target_id  # Предполагаем, что target_id содержит username канала
                     is_boost_active = None #await boost(channel_username, user_id)
-                    print(f'Проверка буста для {user_id} в {channel_username}: {is_boost_active}')
+                    logger.info(f'Проверка буста для {user_id} в {channel_username}: {is_boost_active}')
                     
                     if not is_boost_active:
                         # Отправка предупреждения
@@ -115,10 +115,10 @@ async def check_subscriptions_periodically_boost(bot: Bot):
                                                        (user_id, channel_username)) 
                                 await DB.con.commit() 
                         except Exception as e:
-                            print(f"Ошибка обработки штрафа за буст: {e}") 
+                            logger.info(f"Ошибка обработки штрафа за буст: {e}") 
                             
                 except Exception as e:
-                    print(f"Ошибка проверки буста: {e}")
+                    logger.info(f"Ошибка проверки буста: {e}")
 
             # Ежедневное уменьшение rem_days
             if datetime.now().hour == 0 or datetime.now().hour == 1:  # В полночь
@@ -131,4 +131,4 @@ async def check_subscriptions_periodically_boost(bot: Bot):
                 await DB.con.commit() 
                 
         except Exception as e:
-            print(f"Ошибка в фоновой задаче: {e}")
+            logger.info(f"Ошибка в фоновой задаче: {e}")
