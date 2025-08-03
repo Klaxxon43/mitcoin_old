@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/profile.css') }}">
   <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://static.sonartech.io/lib/1.0.0/sonar.js?appId=app_55c0d976&isDebug=true"></script>
 {% endblock %}
 
 {% block content %}
@@ -14,6 +15,7 @@
     <div class="profile-card">
       <h2 style="margin-top: 0;">👤 User Profile</h2>
       <div id="user-data">Loading user data...</div>
+      <!-- <button id="show-rewarded-ad" class="btn">🎁 Watch Ad & Earn</button> -->
     </div>
 
     <div class="balance-card">
@@ -28,6 +30,10 @@
         <p><strong>TON Balance:</strong> <span id="ton-balance" class="ton-balance">–</span></p>
       </div>
     </div>
+
+    <!-- <div class="sonar-ad">
+      <div id="rewarded"></div>
+    </div> -->
 
     <div id="status" class="status"></div>
   </div>

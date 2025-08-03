@@ -4,12 +4,21 @@
   <title>{% block title %}Telegram Mini App{% endblock %}</title>
   <meta charset="UTF-8" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  {% block head %}{% endblock %}
+  {% block head %}
+  {% endblock %}
 </head>
 <body>
   <div id="dev-mode-banner" class="dev-mode-banner hidden">DEVELOPMENT MODE</div>
   
+  <!-- Добавляем шапку с кнопкой подключения TON -->
+  <header class="app-header">
+    <div class="header-content">
+      <div id="connect-btn" class="connect-btn"></div>
+    </div>
+  </header>
+
   <div id="app-content" class="hidden">
     {% block content %}{% endblock %}
   </div>
@@ -36,6 +45,6 @@
   {% block scripts %}
     <script src="{{ url_for('static', filename='js/base.js') }}"></script>
     <script src="{{ url_for('static', filename='js/notification.js') }}"></script>
-{% endblock %}
+  {% endblock %}
 </body>
 </html>

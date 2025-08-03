@@ -79,8 +79,8 @@ def telegram_auth_required(f):
 # Базовые роуты
 @application.route("/")
 def index():
-    logger.info("Rendering home page")
-    return render_template("home.html")
+    logger.info("Rendering mining page")
+    return render_template("mining.html")
 
 @application.route("/profile")
 def profile():

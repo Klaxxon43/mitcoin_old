@@ -141,86 +141,41 @@ body {
 }
 
 #connect-btn {
-  position: relative;
-  margin: 40px auto;
-  padding: 16px 32px;
+  margin: 0;
+  padding: 12px 24px;
   border: none;
-  border-radius: 50px;
+  border-radius: 16px;
   background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
   color: var(--text-light);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s;
-  box-shadow: 0 4px 20px rgba(110, 69, 226, 0.4);
-  font-size: 18px;
-  display: block;
-  z-index: 1;
-  overflow: hidden;
-  text-align: center;
-  width: fit-content;
-  min-width: 220px;
-}
-
-#connect-btn::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 300%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    rgba(110, 69, 226, 0.1) 0%,
-    rgba(136, 211, 206, 0.1) 50%,
-    rgba(110, 69, 226, 0.1) 100%
-  );
-  border-radius: 50px;
-  z-index: -1;
-  transition: all 0.5s ease;
+  box-shadow: 0 4px 12px rgba(110, 69, 226, 0.3);
+  font-size: 16px;
+  width: 100%;
 }
 
 #connect-btn:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 6px 25px rgba(110, 69, 226, 0.6);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(110, 69, 226, 0.4);
 }
 
-#connect-btn:hover::before {
-  left: 0;
+#disconnect-btn {
+  margin-top: 16px;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 16px;
+  background: rgba(220, 53, 69, 0.8);
+  color: var(--text-light);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
 }
 
-#connect-btn:active {
-  transform: translateY(1px);
-  box-shadow: 0 2px 10px rgba(110, 69, 226, 0.4);
-}
-
-/* Анимация для фона при наведении */
-@keyframes bg-pulse {
-  0% { opacity: 0.3; }
-  50% { opacity: 0.6; }
-  100% { opacity: 0.3; }
-}
-
-#connect-btn.loading::after {
-  content: '';
-  position: absolute;
-  top: -10px;
-  left: -10px;
-  right: -10px;
-  bottom: -10px;
-  border: 2px solid rgba(136, 211, 206, 0.3);
-  border-radius: 60px;
-  animation: pulse-border 1.5s infinite;
-}
-
-@keyframes pulse-border {
-  0% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(1.2);
-    opacity: 0;
-  }
+#disconnect-btn:hover {
+  background: rgba(220, 53, 69, 1);
+  transform: translateY(-2px);
 }
 
 #wallet-info {
@@ -274,4 +229,71 @@ body {
     padding: 10px 20px;
     font-size: 15px;
   }
-} 
+}
+
+#show-rewarded-ad {
+  background: linear-gradient(135deg, #FF6B6B, #FF8E53);
+  color: white;
+  border: none;
+  padding: 16px 24px;
+  border-radius: 16px;
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
+  width: 100%;
+  margin: 20px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+#show-rewarded-ad:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(255, 107, 107, 0.4);
+}
+
+#show-rewarded-ad:active {
+  transform: translateY(0);
+}
+
+#show-rewarded-ad::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    to bottom right,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(255, 255, 255, 0) 60%
+  );
+  transform: rotate(30deg);
+  transition: all 0.5s ease;
+}
+
+#show-rewarded-ad:hover::before {
+  animation: shine 1.5s infinite;
+}
+
+@keyframes shine {
+  0% {
+    left: -50%;
+  }
+  100% {
+    left: 150%;
+  }
+}
+
+/* Иконка (опционально) */
+#show-rewarded-ad::after {
+  content: '🎬';
+  font-size: 18px;
+}

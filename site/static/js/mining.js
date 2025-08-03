@@ -31,6 +31,21 @@ function setupMiningAutoRefresh() {
   }, 30000); // 30 секунд
 }
 
+// Добавляем обработчик события для кнопки обновления
+function setupRefreshButton() {
+  const refreshButton = document.getElementById('refresh-button');
+  if (refreshButton) {
+    refreshButton.addEventListener('click', async () => {
+      try {
+        await showMiningStatus();
+      } catch (error) {
+        console.error('Refresh error:', error);
+        showStatus('error', 'Ошибка при обновлении');
+      } 
+    });
+  }
+}
+
 function updateWelcomeMessage(user) {
   const welcomeElement = document.getElementById('welcome-text');
   if (!welcomeElement) return;
@@ -291,6 +306,14 @@ async function handleCollect(userId, container) {
     const collectButton = container.querySelector('.collect-button');
     if (collectButton) {
       collectButton.disabled = true;
+      collectButton.textContent = 'Подготовка...';
+    }
+
+    // Показываем рекламу перед сбором
+    await showRewardedAd();
+
+    // Продолжаем процесс сбора после просмотра рекламы
+    if (collectButton) {
       collectButton.textContent = 'Сбор...';
     }
 
@@ -325,7 +348,45 @@ async function handleCollect(userId, container) {
       collectButton.disabled = false;
       collectButton.textContent = 'Собрать';
     }
+    showStatus('error', `Ошибка: ${error.message}`);
   }
+}
+
+async function showRewardedAd() {
+  return new Promise((resolve, reject) => {
+    showStatus('info', 'Загрузка рекламы...');
+    
+    window.Sonar.show({ 
+      adUnit: 'rewarded',
+      loader: true,
+      
+      onStart: () => {
+        console.log('Реклама начала загружаться');
+      },
+      
+      onShow: () => {
+        showStatus('info', 'Смотрите рекламу для получения награды');
+      },
+      
+      onError: (error) => {
+        showStatus('error', 'Ошибка загрузки рекламы');
+        reject(new Error(error?.message || 'Ошибка при показе рекламы'));
+      },
+      
+      onClose: () => {
+        console.log('Реклама закрыта');
+      },
+      
+      onReward: () => {
+        showStatus('success', 'Реклама просмотрена!');
+        resolve({ status: 'completed' });
+      }
+    }).then((result) => {
+      if (result.status === 'error') {
+        reject(new Error(result.message || 'Ошибка при показе рекламы'));
+      }
+    }).catch(reject);
+  });
 }
 
 async function handleStartMining(userId, container) {
@@ -478,28 +539,11 @@ function renderInactiveMining(container, data, userId) {
 
 // Основная функция инициализации
 async function initApp() {
-    try {
-      await loadConfig();
-      
-      // Инициализация TON Connect
-      if (window.TON_CONNECT_UI) {
-        tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
-          manifestUrl: 'https://yourdomain.com/tonconnect-manifest.json',
-          buttonRootId: 'ton-connect-button',
-          uiPreferences: { 
-            language: 'ru'
-          }
-        });
-  
-        tonConnectUI.onStatusChange(wallet => {
-          console.log('Wallet status changed:', wallet);
-        });
-      }
-  
-      // Остальной код инициализации...
-      if (appConfig.DEBUG_MODE) {
-        console.log('Auto-refresh initialized');
-      }
+  try {
+    await loadConfig();
+    if (appConfig.DEBUG_MODE) {
+      console.log('Auto-refresh initialized');
+    }
 
     if (appConfig.DEBUG_MODE) {
       const banner = document.getElementById('dev-mode-banner');
@@ -527,6 +571,7 @@ async function initApp() {
 
     updateWelcomeMessage(user);
     setupNavigation();
+    setupRefreshButton();
     await showMiningStatus();
     
     showStatus('success', appConfig.DEBUG_MODE ? 
@@ -558,6 +603,7 @@ async function initApp() {
     setupMiningAutoRefresh();
   }
 }
+
 // Запуск приложения
 document.addEventListener('DOMContentLoaded', initApp);
 

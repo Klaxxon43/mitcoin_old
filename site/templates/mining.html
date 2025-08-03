@@ -3,13 +3,18 @@
 {% block title %}Telegram Mini App - Майнинг{% endblock %}
 
 {% block head %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mining.css') }}">
   <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+  <script src="https://static.sonartech.io/lib/1.0.0/sonar.js?appId=app_55c0d976&isDebug=true"></script>
+
 {% endblock %}
 
 {% block content %}
+
   <div class="content">
     <!-- Заголовок майнинга -->
+     
     <div class="mining-header">
       <div class="mining-icon-container">
         <div class="mining-icon">⛏️</div>
@@ -62,5 +67,5 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="{{ url_for('static', filename='js/home.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mining.js') }}"></script>
 {% endblock %}

@@ -11,7 +11,9 @@ const elements = {
   tonBalance: document.getElementById('ton-balance'),
   walletInfo: document.getElementById('wallet-info'),
   devModeBanner: document.getElementById('dev-mode-banner'),
-  connectBtn: document.getElementById('connect-btn')
+  connectBtn: document.getElementById('connect-btn'),
+  showRewardedAdBtn: document.getElementById('show-rewarded-ad'),
+  rewardedAdContainer: document.getElementById('rewarded')
 };
 
 async function loadConfig() {
@@ -246,10 +248,69 @@ async function initApp() {
     await displayUserData(user);
     setupTonWallet();
     setupNavigation();
+    if (elements.showRewardedAdBtn) {
+      elements.showRewardedAdBtn.addEventListener('click', showRewardedAd);
+    }
 
   } catch (error) {
     await handleInitError(error);
   }
+}
+
+async function showRewardedAd() {
+  return new Promise((resolve, reject) => {
+    showStatus('info', 'Loading ad...');
+    
+    window.Sonar.show({ 
+      adUnit: 'rewarded',
+      loader: true,
+      
+      onStart: () => {
+        console.log('Ad started loading');
+      },
+      
+      onShow: () => {
+        showStatus('info', 'Watch the ad to get reward');
+      },
+      
+      onError: (error) => {
+        showStatus('error', 'Ad loading error');
+        reject(new Error(error?.message || 'Failed to show ad'));
+      },
+      
+      onClose: () => {
+        console.log('Ad closed');
+        // Награда уже должна быть выдана в onReward, если пользователь заслужил её
+      },
+      
+      onReward: () => {
+        try {
+          // Получаем userId
+          const userId = appConfig.DEBUG_MODE ? appConfig.DEV_USER_ID : 
+                       Telegram.WebApp.initDataUnsafe.user?.id;
+          
+          // Вызываем функцию начисления награды
+          grantReward(userId);
+          
+          showStatus('success', 'Reward granted!');
+          resolve({ status: 'completed' });
+        } catch (error) {
+          reject(error);
+        }
+      }
+    }).then((result) => {
+      if (result.status === 'error') {
+        reject(new Error(result.message || 'Failed to show ad'));
+      }
+    }).catch(reject);
+  });
+}
+
+// Функция для начисления награды
+function grantReward(userId) {
+  console.log('Reward granted for user:', userId);
+  // Здесь должна быть логика начисления награды пользователю
+  // Например, вызов API вашего сервера
 }
 
 async function sendTransaction() {

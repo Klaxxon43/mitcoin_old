@@ -235,8 +235,3 @@ body {
 .menu-item.active .menu-icon {
   animation: pulse 1.5s infinite;
 }
-
-/* Add space for content above footer */
-body {
-  padding-bottom: var(--footer-height);
-}
